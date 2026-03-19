@@ -1,5 +1,9 @@
-import { AppWrapper } from "@/components/app-wrapper"
+"use client";
+
+import { LandingScreen } from "@/components/screens/landing-screen";
+import { useNavigate } from "@/lib/routes";
 
 export default function Home() {
-  return <AppWrapper />
+  const navigate = useNavigate();
+  return <LandingScreen onNavigate={navigate} />;
 }

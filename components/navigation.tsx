@@ -1,23 +1,23 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { cn } from '@/lib/utils'
 import { Menu, X, Bell, Settings, LogOut, User, ChevronDown } from 'lucide-react'
+import { PATH_TO_SCREEN, useNavigate } from '@/lib/routes'
 
-interface NavigationProps {
-  currentScreen: string
-  onNavigate: (screen: string) => void
-}
-
-export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
+export function Navigation() {
   const { isLoggedIn, user, logout } = useAuth()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const pathname = usePathname()
+  const navigate = useNavigate()
+  const currentScreen = PATH_TO_SCREEN[pathname] ?? 'landing'
 
   const handleNavigate = (screen: string) => {
-    onNavigate(screen)
+    navigate(screen)
     setMobileMenuOpen(false)
     setProfileDropdownOpen(false)
   }
@@ -36,12 +36,13 @@ export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
   return (
     <>
       <nav className="sticky top-0 z-50 bg-ink flex items-center justify-between px-4 md:px-8 h-14">
-        <div 
-          className="font-display font-bold text-lg md:text-xl text-white tracking-tight flex items-center gap-2 cursor-pointer"
-          onClick={() => handleNavigate('landing')}
+        <a 
+          href="/"
+          onClick={e => { e.preventDefault(); handleNavigate('landing') }}
+          className="font-display font-bold text-lg md:text-xl text-white tracking-tight flex items-center gap-2 cursor-pointer no-underline"
         >
           Mock<span className="text-primary">Mate</span>
-        </div>
+        </a>
 
         {/* Desktop Navigation */}
         <div className="hidden md:flex items-center gap-1">
@@ -49,47 +50,54 @@ export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
             <>
               <NavLink 
                 active={currentScreen === 'landing'} 
+                href="/"
                 onClick={() => handleNavigate('landing')}
               >
                 Home
               </NavLink>
               <NavLink 
                 active={currentScreen === 'feed'} 
+                href="/feed"
                 onClick={() => handleNavigate('feed')}
               >
                 Browse goals
               </NavLink>
               <div className="w-px h-5 bg-white/10 mx-2" />
-              <NavLink onClick={() => handleNavigate('login')}>Log in</NavLink>
-              <button 
-                className="ml-1 bg-primary text-white text-xs font-display font-semibold px-4 py-1.5 rounded-md hover:bg-[#e04400] transition-colors"
-                onClick={() => handleNavigate('signup')}
+              <NavLink href="/login" onClick={() => handleNavigate('login')}>Log in</NavLink>
+              <a 
+                href="/signup"
+                onClick={e => { e.preventDefault(); handleNavigate('signup') }}
+                className="ml-1 bg-primary text-white text-xs font-display font-semibold px-4 py-1.5 rounded-md hover:bg-[#e04400] transition-colors no-underline"
               >
                 Sign up free
-              </button>
+              </a>
             </>
           ) : (
             <>
               <NavLink 
                 active={currentScreen === 'feed'} 
+                href="/feed"
                 onClick={() => handleNavigate('feed')}
               >
                 Browse
               </NavLink>
               <NavLink 
                 active={currentScreen === 'post'} 
+                href="/post-goal"
                 onClick={() => handleNavigate('post')}
               >
                 Post Goal
               </NavLink>
               <NavLink 
                 active={currentScreen === 'dashboard'} 
+                href="/dashboard"
                 onClick={() => handleNavigate('dashboard')}
               >
                 Dashboard
               </NavLink>
               <NavLink 
                 active={currentScreen === 'myapplications'} 
+                href="/my-applications"
                 onClick={() => handleNavigate('myapplications')}
               >
                 My Applications
@@ -97,13 +105,14 @@ export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
               <div className="w-px h-5 bg-white/10 mx-2" />
               
               {/* Notifications Bell */}
-              <button 
-                className="relative p-2 text-white/50 hover:text-white hover:bg-white/5 rounded-md transition-colors"
-                onClick={() => handleNavigate('notifications')}
+              <a 
+                href="/notifications"
+                onClick={e => { e.preventDefault(); handleNavigate('notifications') }}
+                className="relative p-2 text-white/50 hover:text-white hover:bg-white/5 rounded-md transition-colors no-underline"
               >
                 <Bell size={18} />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full" />
-              </button>
+              </a>
 
               {/* Profile Dropdown */}
               <div className="relative" ref={dropdownRef}>
@@ -157,12 +166,14 @@ export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
                     <div className="py-1">
                       <DropdownItem 
                         icon={<User size={16} />} 
+                        href="/profile"
                         onClick={() => handleNavigate('profile')}
                       >
                         View Profile
                       </DropdownItem>
                       <DropdownItem 
                         icon={<Settings size={16} />} 
+                        href="/profile"
                         onClick={() => handleNavigate('profile')}
                       >
                         Settings
@@ -200,24 +211,27 @@ export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
               <>
                 <MobileNavLink 
                   active={currentScreen === 'landing'} 
+                  href="/"
                   onClick={() => handleNavigate('landing')}
                 >
                   Home
                 </MobileNavLink>
                 <MobileNavLink 
                   active={currentScreen === 'feed'} 
+                  href="/feed"
                   onClick={() => handleNavigate('feed')}
                 >
                   Browse goals
                 </MobileNavLink>
                 <div className="h-px bg-white/10 my-2" />
-                <MobileNavLink onClick={() => handleNavigate('login')}>Log in</MobileNavLink>
-                <button 
-                  className="bg-primary text-white text-sm font-display font-semibold px-4 py-3 rounded-lg hover:bg-[#e04400] transition-colors mt-2"
-                  onClick={() => handleNavigate('signup')}
+                <MobileNavLink href="/login" onClick={() => handleNavigate('login')}>Log in</MobileNavLink>
+                <a 
+                  href="/signup"
+                  onClick={e => { e.preventDefault(); handleNavigate('signup') }}
+                  className="block bg-primary text-white text-sm font-display font-semibold px-4 py-3 rounded-lg hover:bg-[#e04400] transition-colors mt-2 text-center no-underline"
                 >
                   Sign up free
-                </button>
+                </a>
               </>
             ) : (
               <>
@@ -237,30 +251,35 @@ export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
                 <div className="h-px bg-white/10 mb-2" />
                 <MobileNavLink 
                   active={currentScreen === 'feed'} 
+                  href="/feed"
                   onClick={() => handleNavigate('feed')}
                 >
                   Browse
                 </MobileNavLink>
                 <MobileNavLink 
                   active={currentScreen === 'post'} 
+                  href="/post-goal"
                   onClick={() => handleNavigate('post')}
                 >
                   Post Goal
                 </MobileNavLink>
                 <MobileNavLink 
                   active={currentScreen === 'dashboard'} 
+                  href="/dashboard"
                   onClick={() => handleNavigate('dashboard')}
                 >
                   Dashboard
                 </MobileNavLink>
                 <MobileNavLink 
                   active={currentScreen === 'myapplications'} 
+                  href="/my-applications"
                   onClick={() => handleNavigate('myapplications')}
                 >
                   My Applications
                 </MobileNavLink>
                 <MobileNavLink 
                   active={currentScreen === 'notifications'} 
+                  href="/notifications"
                   onClick={() => handleNavigate('notifications')}
                 >
                   Notifications
@@ -268,6 +287,7 @@ export function Navigation({ currentScreen, onNavigate }: NavigationProps) {
                 <div className="h-px bg-white/10 my-2" />
                 <MobileNavLink 
                   active={currentScreen === 'profile'} 
+                  href="/profile"
                   onClick={() => handleNavigate('profile')}
                 >
                   View Profile
@@ -288,24 +308,27 @@ function NavLink({
   children, 
   active, 
   onClick,
+  href,
   className
 }: { 
   children: React.ReactNode
   active?: boolean
   onClick?: () => void
+  href?: string
   className?: string
 }) {
   return (
-    <button
-      onClick={onClick}
+    <a
+      href={href ?? '#'}
+      onClick={e => { e.preventDefault(); onClick?.() }}
       className={cn(
-        "text-[13px] font-mono text-white/50 px-3.5 py-1.5 rounded-md cursor-pointer border-none bg-transparent transition-all hover:text-white hover:bg-white/5",
+        "text-[13px] font-mono text-white/50 px-3.5 py-1.5 rounded-md cursor-pointer border-none bg-transparent transition-all hover:text-white hover:bg-white/5 no-underline",
         active && "text-primary bg-white/5",
         className
       )}
     >
       {children}
-    </button>
+    </a>
   )
 }
 
@@ -313,24 +336,27 @@ function MobileNavLink({
   children, 
   active, 
   onClick,
+  href,
   className
 }: { 
   children: React.ReactNode
   active?: boolean
   onClick?: () => void
+  href?: string
   className?: string
 }) {
   return (
-    <button
-      onClick={onClick}
+    <a
+      href={href ?? '#'}
+      onClick={e => { e.preventDefault(); onClick?.() }}
       className={cn(
-        "text-base font-mono text-white/70 px-4 py-3 rounded-lg cursor-pointer border-none bg-transparent transition-all hover:text-white hover:bg-white/5 text-left",
+        "block text-base font-mono text-white/70 px-4 py-3 rounded-lg cursor-pointer transition-all hover:text-white hover:bg-white/5 no-underline",
         active && "text-primary bg-white/10",
         className
       )}
     >
       {children}
-    </button>
+    </a>
   )
 }
 
@@ -338,23 +364,26 @@ function DropdownItem({
   children, 
   icon,
   onClick,
+  href,
   className
 }: { 
   children: React.ReactNode
   icon: React.ReactNode
   onClick?: () => void
+  href?: string
   className?: string
 }) {
   return (
-    <button
-      onClick={onClick}
+    <a
+      href={href ?? '#'}
+      onClick={e => { e.preventDefault(); onClick?.() }}
       className={cn(
-        "w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text2 hover:bg-surface transition-colors text-left",
+        "w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text2 hover:bg-surface transition-colors no-underline",
         className
       )}
     >
       {icon}
       {children}
-    </button>
+    </a>
   )
 }

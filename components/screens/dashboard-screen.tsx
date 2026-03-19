@@ -121,7 +121,8 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   const activeGoal =
     myGoals.find((g) => !["completed", "cancelled"].includes(g.status)) ?? null;
   const trustScore = stats?.trustScore ?? user?.trustScore ?? 500;
-  const repsDone = stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
+  const repsDone =
+    stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
   const repsLeft = (activeGoal?.repsTotal ?? 100) - repsDone;
   const streak = stats?.currentStreak ?? 0;
 
@@ -428,7 +429,8 @@ function OverviewTab({
       </div>
     );
 
-  const repsDone = stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
+  const repsDone =
+    stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
   const repsTotal = activeGoal?.repsTotal ?? 100;
   const pct = Math.round((repsDone / repsTotal) * 100);
 
