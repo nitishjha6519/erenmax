@@ -15,9 +15,15 @@ import { NotificationsScreen } from "@/components/screens/notifications-screen"
 
 function AppContent() {
   const [currentScreen, setCurrentScreen] = useState("landing")
+  const [sessionId, setSessionId] = useState<string | undefined>()
 
   const handleNavigate = (screen: string) => {
-    setCurrentScreen(screen)
+    if (screen.startsWith('session:')) {
+      setSessionId(screen.split(':')[1])
+      setCurrentScreen('session')
+    } else {
+      setCurrentScreen(screen)
+    }
     // Scroll to top on navigation
     window.scrollTo(0, 0)
   }
@@ -39,7 +45,7 @@ function AppContent() {
       case "profile":
         return <ProfileScreen />
       case "session":
-        return <SessionScreen onNavigate={handleNavigate} />
+        return <SessionScreen onNavigate={handleNavigate} sessionId={sessionId} />
       case "myapplications":
         return <MyApplicationsScreen onNavigate={handleNavigate} />
       case "notifications":

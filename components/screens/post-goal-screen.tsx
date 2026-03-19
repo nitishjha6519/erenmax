@@ -3,20 +3,54 @@
 import { useState } from 'react'
 import { Button } from "@/components/ui/button"
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
+import { useAuth } from '@/lib/auth-context'
 
 interface PostGoalScreenProps {
   onNavigate: (screen: string) => void
 }
 
 export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
+  const { user } = useAuth()
   const [currentStep, setCurrentStep] = useState(1)
-  const [goalTitle, setGoalTitle] = useState('Crack FAANG in 10 weeks')
+  const [goalTitle, setGoalTitle] = useState('')
   const [selectedTypes, setSelectedTypes] = useState(['DSA'])
+  const [description, setDescription] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [duration, setDuration] = useState('60')
+  const [platform, setPlatform] = useState('Google Meet')
+  const [approvalDeadline, setApprovalDeadline] = useState('6h')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   const toggleType = (type: string) => {
-    setSelectedTypes(prev => 
+    setSelectedTypes(prev =>
       prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
     )
+  }
+
+  const handlePost = async () => {
+    setSubmitting(true)
+    setSubmitError('')
+    try {
+      const category = selectedTypes[0]?.toLowerCase().replace(' ', '') === 'systemdesign' ? 'systemdesign' : selectedTypes[0]?.toLowerCase() ?? 'dsa'
+      await api.goals.create({
+        title: goalTitle || 'Untitled goal',
+        description,
+        category,
+        difficulty: 'intermediate',
+        pledgedPoints: 100,
+        defaultDurationMins: Number(duration),
+        defaultPlatform: platform,
+        approvalDeadlineOffset: approvalDeadline,
+      })
+      onNavigate('dashboard')
+    } catch(e: unknown) {
+      setSubmitError(e instanceof Error ? e.message : 'Failed to post goal. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -82,10 +116,12 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
               </div>
               <div className="mb-5">
                 <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Why does this matter to you?</label>
-                <textarea 
+                <textarea
                   className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none resize-none"
                   rows={3}
                   placeholder="This is shown publicly on your goal. Be honest — it attracts helpers who take it as seriously as you do."
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
                 />
               </div>
               <Button className="w-full" onClick={() => setCurrentStep(2)}>Continue</Button>
@@ -99,46 +135,50 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 md:mb-5">
                 <div>
                   <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Target start date</label>
-                  <input 
+                  <input
                     type="date"
                     className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
                   />
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Target completion</label>
-                  <input 
+                  <input
                     type="date"
                     className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none"
+                    value={endDate}
+                    onChange={e => setEndDate(e.target.value)}
                   />
                 </div>
               </div>
               <div className="mb-4 md:mb-5">
                 <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Default session length</label>
                 <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-2">Can be set per-topic when you add sessions.</div>
-                <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer">
-                  <option>30 mins</option>
-                  <option>45 mins</option>
-                  <option>60 mins</option>
-                  <option>90 mins</option>
+                <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer" value={duration} onChange={e=>setDuration(e.target.value)}>
+                  <option value="30">30 mins</option>
+                  <option value="45">45 mins</option>
+                  <option value="60">60 mins</option>
+                  <option value="90">90 mins</option>
                 </select>
               </div>
               <div className="mb-4 md:mb-5">
                 <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Default meeting platform</label>
-                <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer">
-                  <option>Google Meet</option>
-                  <option>Zoom</option>
-                  <option>Microsoft Teams</option>
-                  <option>I&apos;ll share links per session</option>
+                <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer" value={platform} onChange={e=>setPlatform(e.target.value)}>
+                  <option value="Google Meet">Google Meet</option>
+                  <option value="Zoom">Zoom</option>
+                  <option value="Microsoft Teams">Microsoft Teams</option>
+                  <option value="per_session">I&apos;ll share links per session</option>
                 </select>
               </div>
               <div className="mb-5 md:mb-6">
                 <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Default approval deadline</label>
                 <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-2">How long before a session slot expires if you don&apos;t respond to applicants.</div>
-                <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer">
-                  <option>2h before session</option>
-                  <option>6h before session</option>
-                  <option>12h before session</option>
-                  <option>24h before session</option>
+                <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer" value={approvalDeadline} onChange={e=>setApprovalDeadline(e.target.value)}>
+                  <option value="2h">2h before session</option>
+                  <option value="6h">6h before session</option>
+                  <option value="12h">12h before session</option>
+                  <option value="24h">24h before session</option>
                 </select>
               </div>
               <div className="flex gap-2">
@@ -184,9 +224,10 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
                   After posting, go to your Dashboard → Sessions tab to add specific topics (Arrays, System Design problems, Behavioral themes). Each topic becomes an open slot the community can apply to fill.
                 </div>
               </div>
+              {submitError && <div className="bg-red-bg text-red text-xs rounded-lg px-3 py-2 mb-3">{submitError}</div>}
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setCurrentStep(2)}>Edit</Button>
-                <Button className="flex-[2]" onClick={() => onNavigate('dashboard')}>Post goal</Button>
+                <Button className="flex-[2]" onClick={handlePost} disabled={submitting}>{submitting ? 'Posting…' : 'Post goal'}</Button>
               </div>
             </div>
           )}
@@ -198,15 +239,15 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
           <div className="bg-card border border-border rounded-[20px] p-5 md:p-6 mb-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full av-orange flex items-center justify-center font-display font-extrabold text-sm">AK</div>
+                <div className="w-10 h-10 rounded-full av-orange flex items-center justify-center font-display font-extrabold text-sm">{user?.initials ?? '??'}</div>
                 <div>
-                  <div className="font-semibold">Arjun Kumar</div>
-                  <div className="font-mono text-[11px] text-text3">Just now · Hyderabad</div>
+                <div className="font-semibold">{user?.name ?? '—'}</div>
+                <div className="font-mono text-[11px] text-text3">Just now{user?.location ? ` · ${user.location}` : ''}</div>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 font-display font-extrabold text-[22px] trust-high">
                 <div className="w-2 h-2 rounded-full bg-green" />
-                780
+                {user?.trustScore ?? 500}
               </div>
             </div>
             <div className="font-display font-bold text-base mb-2">{goalTitle || 'Crack FAANG in 10 weeks'}</div>

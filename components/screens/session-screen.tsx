@@ -1,233 +1,259 @@
-"use client"
+﻿"use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from "@/components/ui/button"
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
+import type { Session, LiveSession } from '@/lib/api'
 
 interface SessionScreenProps {
   onNavigate: (screen: string) => void
+  sessionId?: string
 }
 
-export function SessionScreen({ onNavigate }: SessionScreenProps) {
-  const [time, setTime] = useState(43 * 60 + 21) // 43:21 in seconds
+function avatarColors(id: string) { return (["av-purple","av-green","av-orange","av-blue"] as const)[id.charCodeAt(0)%4]; }
+function getInitials(name: string) { return name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2); }
+
+export function SessionScreen({ onNavigate, sessionId }: SessionScreenProps) {
+  const [session, setSession] = useState<Session|null>(null)
+  const [liveData, setLiveData] = useState<{ isLive: boolean; session: LiveSession }|null>(null)
+  const [loading, setLoading] = useState(true)
+  const [time, setTime] = useState(0)
+  const [notes, setNotes] = useState('')
   const [showUp, setShowUp] = useState('ontime')
   const [quality, setQuality] = useState('5')
-  const [useful, setUseful] = useState('very')
+  const [feedback, setFeedback] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTime(t => t > 0 ? t - 1 : 0)
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
+  useEffect(()=>{
+    const load = async () => {
+      try {
+        if (sessionId) {
+          try {
+            const d = await api.sessions.getLive(sessionId)
+            setLiveData(d)
+            setTime(d.isLive && d.session.endsAt
+              ? Math.max(0, Math.floor((new Date(d.session.endsAt).getTime() - Date.now()) / 1000))
+              : d.session.duration * 60)
+          } catch {
+            // /live endpoint unavailable — fall back to plain session data
+            const d = await api.sessions.get(sessionId)
+            setSession(d.session)
+            setTime(((d.session as { duration?: number }).duration ?? 60) * 60)
+          }
+        } else {
+          const d = await api.sessions.getUpcoming({ limit: 1 })
+          const s = d.sessions[0] ?? null
+          setSession(s)
+          if (s) setTime((s.duration ?? 60) * 60)
+        }
+      } catch(e) { console.error(e) } finally { setLoading(false) }
+    }
+    load()
+  },[sessionId])
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
+  // Only tick the countdown when the session is actually live
+  const isLive = sessionId ? (liveData?.isLive ?? false) : !!session
+
+  useEffect(()=>{
+    if(!isLive) return;
+    timerRef.current = setInterval(()=>setTime(t=>t>0?t-1:0), 1000)
+    return ()=>{ if(timerRef.current) clearInterval(timerRef.current) }
+  },[isLive])
+
+  const formatTime = (s: number) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`
+
+  const handleSubmit = async () => {
+    const sid = liveData?.session.id ?? session?.id
+    if(!sid) return;
+    setSubmitting(true)
+    try {
+      await api.sessions.complete(sid, {
+        rating: Number(quality),
+        feedback,
+        partnerShowedUp: showUp !== 'noshow',
+      })
+      setSubmitted(true)
+      setTimeout(()=>onNavigate('dashboard'), 1200)
+    } catch(e){ console.error(e) } finally { setSubmitting(false) }
   }
+
+  if(loading) return (
+    <div className="animate-fade-up max-w-[1000px]">
+      <div className="bg-card border border-border rounded-[20px] p-6 animate-pulse"><div className="h-5 w-1/3 bg-surface3 rounded mb-3"/><div className="h-3 w-2/3 bg-surface3 rounded"/></div>
+    </div>
+  )
+
+  if(!liveData && !session) return (
+    <div className="animate-fade-up">
+      <div className="font-mono text-[11px] text-text3 tracking-[0.12em] uppercase mb-1.5">Sessions</div>
+      <h1 className="font-display font-extrabold text-2xl md:text-[32px] text-ink tracking-tight mb-5">No upcoming session</h1>
+      <p className="text-sm text-text2 mb-4">You have no upcoming sessions right now. Check your dashboard for your roadmap.</p>
+      <Button onClick={()=>onNavigate('dashboard')}>Back to dashboard</Button>
+    </div>
+  )
+
+  // Unified display values — prefer LiveSession data when available
+  const live = liveData?.session
+  const partner = live?.approvedHelper ?? session?.approvedHelper ?? session?.partner
+  const partnerColor = partner ? avatarColors(partner.id) : 'av-purple'
+  const topic = live?.topic ?? session?.topic ?? ''
+  const sessionNum = session?.sessionNumber
+  const repsLeft = session?.repsLeft ?? 0
+  const meetingLink = live?.meetingLink
+  const scheduledAt = live?.scheduledAt
 
   return (
     <div className="animate-fade-up">
       <div className="font-mono text-[11px] text-text3 tracking-[0.12em] uppercase mb-1.5">Live session</div>
       <h1 className="font-display font-extrabold text-2xl md:text-[32px] text-ink tracking-tight mb-5 md:mb-8">
-        Session <span className="text-primary">#35</span>
+        {sessionNum
+          ? <>Session <span className="text-primary">#{sessionNum}</span></>
+          : live?.goal
+            ? <span className="text-primary">{live.goal.title}</span>
+            : 'Live Session'
+        }
       </h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-6 max-w-[1000px]">
         {/* Left Column */}
         <div>
           {/* Hero Timer */}
-          <div className="bg-ink rounded-[20px] px-5 md:px-8 py-5 md:py-7 mb-4 relative overflow-hidden">
+          <div className={cn("bg-ink rounded-[20px] px-5 md:px-8 py-5 md:py-7 mb-4 relative overflow-hidden", !isLive && "opacity-50")}>
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2 md:gap-3">
-                <div className="w-9 md:w-10 h-9 md:h-10 rounded-full av-purple flex items-center justify-center font-display font-extrabold text-xs md:text-sm">RK</div>
-                <div>
-                  <div className="text-white font-semibold text-sm">Rahul Krishnan</div>
-                  <div className="text-white/40 text-[10px] md:text-xs font-mono">Interviewer today · ★ 892</div>
+              {partner ? (
+                <div className="flex items-center gap-2 md:gap-3">
+                  <div className={`w-9 md:w-10 h-9 md:h-10 rounded-full ${partnerColor} flex items-center justify-center font-display font-extrabold text-xs md:text-sm`}>{getInitials(partner.name)}</div>
+                  <div>
+                    <div className="text-white font-semibold text-sm">{partner.name}</div>
+                    <div className="text-white/40 text-[10px] md:text-xs font-mono">Partner today · ★ {partner.trustScore}</div>
+                  </div>
                 </div>
-              </div>
-              <span className="text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full bg-green/30 text-[#6ee09a]">● Live</span>
+              ) : (
+                <div className="text-white/40 text-sm font-mono">No partner assigned yet</div>
+              )}
+              {isLive
+                ? <span className="text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full bg-green/30 text-[#6ee09a]">● Live</span>
+                : <span className="text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full bg-white/10 text-white/40">◷ Waiting</span>
+              }
             </div>
+            {!isLive && scheduledAt && (
+              <div className="text-white/50 text-xs font-mono mb-3">
+                Starts at {new Date(scheduledAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-4 md:gap-6">
-              <div>
-                <div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">{formatTime(time)}</div>
-                <div className="font-mono text-[10px] md:text-xs text-white/40">remaining</div>
-              </div>
-              <div>
-                <div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">35</div>
-                <div className="font-mono text-[10px] md:text-xs text-white/40">session #</div>
-              </div>
-              <div>
-                <div className="font-display font-extrabold text-2xl md:text-[32px] text-primary tracking-tight">65</div>
-                <div className="font-mono text-[10px] md:text-xs text-white/40">reps left</div>
-              </div>
+              <div><div className={cn("font-display font-extrabold text-2xl md:text-[32px] tracking-tight", isLive ? "text-white" : "text-white/30")}>{formatTime(time)}</div><div className="font-mono text-[10px] md:text-xs text-white/40">remaining</div></div>
+              <div><div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">{sessionNum ?? '—'}</div><div className="font-mono text-[10px] md:text-xs text-white/40">session #</div></div>
+              <div><div className="font-display font-extrabold text-2xl md:text-[32px] text-primary tracking-tight">{repsLeft}</div><div className="font-mono text-[10px] md:text-xs text-white/40">reps left</div></div>
             </div>
           </div>
+
+          {/* Meeting link — only shown when session is live */}
+          {isLive && meetingLink && (
+            <div className="bg-card border border-border rounded-[20px] p-4 md:p-5 mb-4">
+              <div className="font-display font-bold text-base md:text-[17px] mb-2">Meeting link</div>
+              <a href={meetingLink} target="_blank" rel="noopener noreferrer">
+                <Button className="w-full">Join meeting →</Button>
+              </a>
+            </div>
+          )}
 
           {/* Session Topic */}
           <div className="bg-card border border-border rounded-[20px] p-4 md:p-5 mb-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
               <div className="font-display font-bold text-base md:text-[17px]">Today&apos;s topic</div>
-              <span className="badge-dsa text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full self-start">DSA · Session #35</span>
+              {sessionNum && <span className="badge-dsa text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full self-start">Session #{sessionNum}</span>}
             </div>
-            <div className="font-display font-bold text-base md:text-lg mb-1.5">Trees — BFS & DFS</div>
-            <div className="text-xs md:text-sm text-text2 mb-3">Rahul is the interviewer. You are being assessed. Rahul will pick a tree problem and run the mock interview format — introduce it, let you code, probe your reasoning.</div>
-            <div className="flex gap-2 flex-wrap">
-              {['Binary Trees', 'Level Order Traversal', 'Inorder / Preorder', 'Depth-First Search'].map((tag) => (
-                <span key={tag} className="font-mono text-[10px] md:text-[11px] text-text3 px-2 py-0.5 border border-border/50 rounded">{tag}</span>
-              ))}
-            </div>
+            <div className="font-display font-bold text-base md:text-lg mb-1.5">{topic}</div>
+            <div className="text-xs md:text-sm text-text2 mb-3">{partner ? `${partner.name} is the interviewer today. They will run the mock interview format.` : 'Your session partner will be assigned shortly.'}</div>
           </div>
 
-          {/* DSA Checklist */}
+          {/* Session Checklist */}
           <div className="bg-card border border-border rounded-[20px] p-4 md:p-5 mb-4">
             <div className="font-display font-bold text-base md:text-[17px] mb-1">Session checklist</div>
-            <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-3">DSA mock — follow this structure</div>
+            <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-3">Mock session — follow this structure</div>
             <div className="flex flex-col gap-2.5">
               {[
-                { checked: true, label: 'Clarify constraints, input/output, edge cases' },
-                { checked: true, label: 'State brute force approach first, get buy-in' },
-                { checked: false, label: 'Explain optimised approach before coding' },
-                { checked: false, label: 'Narrate while coding — don\'t go silent' },
-                { checked: false, label: 'State time & space complexity' },
-                { checked: false, label: 'Test with provided examples + edge cases' },
-              ].map((item, i) => (
+                'Clarify constraints, input/output, edge cases',
+                'State brute force approach first, get buy-in',
+                'Explain optimised approach before coding',
+                'Narrate while coding — don\'t go silent',
+                'State time & space complexity',
+                'Test with provided examples + edge cases',
+              ].map((item,i)=>(
                 <label key={i} className="flex items-start gap-2.5 cursor-pointer text-xs md:text-sm">
-                  <input type="checkbox" defaultChecked={item.checked} className="w-4 h-4 mt-0.5" />
-                  {item.label}
+                  <input type="checkbox" className="w-4 h-4 mt-0.5" />
+                  {item}
                 </label>
               ))}
             </div>
           </div>
 
-          {/* Interviewer Tips */}
-          <div className="bg-surface rounded-[20px] p-4 md:p-5">
-            <div className="font-display font-bold text-[13px] mb-1">Interviewer guide (for Rahul)</div>
-            <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-2.5">How to run a good mock interview</div>
-            <div className="flex flex-col gap-2 text-xs md:text-[13px] text-text2">
-              {[
-                'Give a real problem, not a hint-heavy version',
-                'Stay quiet while they think — let them struggle',
-                'Only hint if completely stuck for 5+ mins',
-                'Ask "what\'s the complexity?" after they finish',
-                'Give specific, honest feedback at the end',
-              ].map((tip, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0 mt-1.5" />
-                  {tip}
-                </div>
-              ))}
-            </div>
+          {/* Notes */}
+          <div className="bg-card border border-border rounded-[20px] p-4 md:p-5">
+            <div className="font-display font-bold text-base md:text-[17px] mb-3">Session notes</div>
+            <textarea
+              className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none resize-none"
+              rows={5}
+              placeholder="Jot down observations as the session runs..."
+              value={notes}
+              onChange={e=>setNotes(e.target.value)}
+            />
           </div>
         </div>
 
         {/* Right Column */}
         <div>
-          {/* Session Notes */}
-          <div className="bg-card border border-border rounded-[20px] p-4 md:p-5 mb-4">
-            <div className="font-display font-bold text-base md:text-[17px] mb-3">Session notes</div>
-            <textarea 
-              className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none resize-none"
-              rows={5}
-              placeholder="Jot down observations as the session runs...
-
-e.g.
-— Started with brute force O(n²), explained well
-— Missed null pointer edge case
-— Needed hint on using a queue for BFS
-— Coding was clean, variable names good"
-            />
-          </div>
-
           {/* Post-session Feedback */}
-          <div className="bg-card border-[1.5px] border-primary rounded-[20px] p-4 md:p-5">
+          <div className={cn("bg-card border-[1.5px] border-primary rounded-[20px] p-4 md:p-5", !isLive && "opacity-40 pointer-events-none")}>
             <div className="font-display font-bold text-base md:text-[17px] mb-1">Rate this session</div>
-            <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-4">Your rating updates Rahul&apos;s trust score publicly.</div>
+            <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-4">{partner ? `Your rating updates ${partner.name}'s trust score publicly.` : 'Rate your session after it ends.'}</div>
 
-            {/* Show up */}
             <div className="mb-4">
-              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Did Rahul show up?</label>
+              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Did {partner?.name?.split(' ')[0] ?? 'your partner'} show up?</label>
               <div className="flex flex-wrap gap-2">
-                {[
-                  { value: 'ontime', label: 'On time' },
-                  { value: 'late', label: 'Late (<10 min)' },
-                  { value: 'noshow', label: 'No-show' },
-                ].map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setShowUp(opt.value)}
-                    className={cn(
-                      "font-mono text-[10px] md:text-xs font-medium px-3 md:px-4 py-1.5 rounded-full border-[1.5px] border-border bg-card text-text2 cursor-pointer transition-all",
-                      showUp === opt.value && "border-primary text-primary bg-[#fff5f2]"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
+                {[{value:'ontime',label:'On time'},{value:'late',label:'Late (<10 min)'},{value:'noshow',label:'No-show'}].map(opt=>(
+                  <button key={opt.value} onClick={()=>setShowUp(opt.value)} className={cn("font-mono text-[10px] md:text-xs font-medium px-3 md:px-4 py-1.5 rounded-full border-[1.5px] border-border bg-card text-text2 cursor-pointer transition-all",showUp===opt.value&&"border-primary text-primary bg-[#fff5f2]")}>{opt.label}</button>
                 ))}
               </div>
             </div>
 
-            {/* Feedback Quality */}
             <div className="mb-4">
-              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Feedback quality (as interviewer)</label>
+              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Feedback quality</label>
               <div className="flex gap-2">
-                {['1', '2', '3', '4', '5'].map((q) => (
-                  <button
-                    key={q}
-                    onClick={() => setQuality(q)}
-                    className={cn(
-                      "font-mono text-xs font-medium w-9 md:w-10 h-8 rounded-full border-[1.5px] border-border bg-card text-text2 cursor-pointer transition-all",
-                      quality === q && "border-primary text-primary bg-[#fff5f2]"
-                    )}
-                  >
-                    {q}
-                  </button>
+                {['1','2','3','4','5'].map(q=>(
+                  <button key={q} onClick={()=>setQuality(q)} className={cn("font-mono text-xs font-medium w-9 md:w-10 h-8 rounded-full border-[1.5px] border-border bg-card text-text2 cursor-pointer transition-all",quality===q&&"border-primary text-primary bg-[#fff5f2]")}>{q}</button>
                 ))}
               </div>
             </div>
 
-            {/* Usefulness */}
             <div className="mb-4">
-              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Was the session useful?</label>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { value: 'very', label: 'Very useful' },
-                  { value: 'somewhat', label: 'Somewhat' },
-                  { value: 'not', label: 'Not really' },
-                ].map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setUseful(opt.value)}
-                    className={cn(
-                      "font-mono text-[10px] md:text-xs font-medium px-3 md:px-4 py-1.5 rounded-full border-[1.5px] border-border bg-card text-text2 cursor-pointer transition-all",
-                      useful === opt.value && "border-primary text-primary bg-[#fff5f2]"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Written Feedback */}
-            <div className="mb-4">
-              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Written feedback for Rahul (optional)</label>
-              <textarea 
+              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Written feedback (optional)</label>
+              <textarea
                 className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none resize-none"
                 rows={2}
-                placeholder="e.g. Great probing questions. Pushed me when I went silent. Could be more specific on hints."
+                placeholder="e.g. Great probing questions. Pushed me when I went silent."
+                value={feedback}
+                onChange={e=>setFeedback(e.target.value)}
               />
             </div>
 
-            {/* Stake Notice */}
-            <div className="bg-surface rounded-lg px-3.5 py-2.5 mb-4 text-xs text-text2">
-              Rahul staked <strong className="text-foreground">150 pts</strong>. Marking no-show will deduct them automatically.
-            </div>
+            {partner && (
+              <div className="bg-surface rounded-lg px-3.5 py-2.5 mb-4 text-xs text-text2">
+                {partner.name} staked <strong className="text-foreground">{(live ? 0 : session?.stakedPoints) ?? 0} pts</strong>. Marking no-show will deduct them automatically.
+              </div>
+            )}
 
-            <Button className="w-full" onClick={() => onNavigate('dashboard')}>
-              Submit & complete session
-            </Button>
+            {submitted ? (
+              <div className="bg-green-bg rounded-lg px-4 py-3 text-center text-sm text-green font-medium">Session completed! Redirecting…</div>
+            ) : (
+              <Button className="w-full" onClick={handleSubmit} disabled={submitting}>
+                {submitting ? 'Submitting…' : 'Submit & complete session'}
+              </Button>
+            )}
           </div>
         </div>
       </div>

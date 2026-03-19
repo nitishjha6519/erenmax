@@ -1,58 +1,204 @@
-"use client"
+﻿"use client";
 
-import { useState } from 'react'
-import { Button } from "@/components/ui/button"
-import { cn } from '@/lib/utils'
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import type {
+  Goal,
+  GoalDetail,
+  Session,
+  Partner,
+  UserStats,
+  Application,
+  TrustHistoryEntry,
+} from "@/lib/api";
 
 interface DashboardScreenProps {
-  onNavigate: (screen: string) => void
+  onNavigate: (screen: string) => void;
+}
+
+function getInitials(name?: string) {
+  return (
+    (name || "?")
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2) || "?"
+  );
+}
+function avatarColors(id?: string) {
+  return (["av-purple", "av-green", "av-orange", "av-blue"] as const)[
+    ((id ?? "").charCodeAt(0) || 0) % 4
+  ];
+}
+function formatRelDate(d: string) {
+  const h = Math.floor((Date.now() - new Date(d).getTime()) / 3600000);
+  if (h < 1) return "just now";
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+function formatScheduled(d: string) {
+  const dt = new Date(d);
+  const now = new Date();
+  const isToday = dt.toDateString() === now.toDateString();
+  if (isToday)
+    return `Today · ${dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  return (
+    dt.toLocaleDateString("en-US", { weekday: "short" }) +
+    " · " +
+    dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+  );
+}
+function catBadgeClass(c?: string) {
+  const k = (c ?? "").toLowerCase().replace(/\s/g, "");
+  return k === "dsa"
+    ? "badge-dsa"
+    : k === "systemdesign"
+      ? "badge-design"
+      : "badge-behavioral";
+}
+function catLabel(c?: string) {
+  return (
+    (
+      {
+        dsa: "DSA",
+        systemdesign: "System Design",
+        behavioral: "Behavioral",
+      } as Record<string, string>
+    )[(c ?? "").toLowerCase().replace(/\s/g, "")] ??
+    (c || "")
+  );
+}
+function expiresIn(deadline?: string): string {
+  if (!deadline) return "";
+  const h = Math.ceil((new Date(deadline).getTime() - Date.now()) / 3600000);
+  if (h <= 0) return "expired";
+  if (h < 24) return `${h}h`;
+  return `${Math.ceil(h / 24)}d`;
 }
 
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
-  const [activeTab, setActiveTab] = useState('overview')
-  const [showAddTopicModal, setShowAddTopicModal] = useState(false)
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState("overview");
+  const [showAddTopicModal, setShowAddTopicModal] = useState(false);
+  const [addTopicCategory, setAddTopicCategory] = useState("DSA");
+  const [addTopicTopic, setAddTopicTopic] = useState("");
+  const [addTopicDate, setAddTopicDate] = useState("");
+  const [addTopicDuration, setAddTopicDuration] = useState("60");
+  const [addTopicDeadline, setAddTopicDeadline] = useState("2h");
+  const [addTopicLoading, setAddTopicLoading] = useState(false);
+  const [addTopicError, setAddTopicError] = useState("");
+  const [stats, setStats] = useState<UserStats | null>(null);
+  const [myGoals, setMyGoals] = useState<Goal[]>([]);
+  const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+
+  useEffect(() => {
+    api.users
+      .getMyStats()
+      .then((s) =>
+        setStats({
+          ...s.stats,
+          scoreBreakdown: s.scoreBreakdown ?? s.stats.scoreBreakdown,
+        }),
+      )
+      .catch(console.error);
+    api.goals
+      .myGoals({ status: "all" })
+      .then((g) => setMyGoals(g.goals))
+      .catch(console.error)
+      .finally(() => setDataLoading(false));
+    api.sessions
+      .getUpcoming({ limit: 5 })
+      .then((s) => setUpcomingSessions(s.sessions))
+      .catch(console.error);
+  }, []);
+
+  const activeGoal =
+    myGoals.find((g) => !["completed", "cancelled"].includes(g.status)) ?? null;
+  const trustScore = stats?.trustScore ?? user?.trustScore ?? 500;
+  const repsDone = stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
+  const repsLeft = (activeGoal?.repsTotal ?? 100) - repsDone;
+  const streak = stats?.currentStreak ?? 0;
+
+  const handleAddTopic = async () => {
+    if (!activeGoal?.id || !addTopicTopic.trim() || !addTopicDate) return;
+    setAddTopicLoading(true);
+    setAddTopicError("");
+    try {
+      await api.goals.addSession(activeGoal.id, {
+        topic: addTopicTopic.trim(),
+        category: addTopicCategory,
+        scheduledDate: new Date(addTopicDate).toISOString(),
+        durationMins: parseInt(addTopicDuration),
+        approvalDeadlineOffset: addTopicDeadline,
+      });
+      setShowAddTopicModal(false);
+      setAddTopicTopic("");
+      setAddTopicDate("");
+    } catch (e) {
+      setAddTopicError(
+        e instanceof Error ? e.message : "Failed to post topic. Try again.",
+      );
+    } finally {
+      setAddTopicLoading(false);
+    }
+  };
 
   return (
     <div className="animate-fade-up">
       {/* Hero */}
       <div className="bg-ink rounded-[20px] px-5 md:px-10 py-6 md:py-9 mb-5 md:mb-6 relative overflow-hidden">
-        <div className="absolute right-4 md:right-8 -top-2.5 font-display text-[80px] md:text-[120px] font-extrabold text-white/5 leading-none tracking-tight pointer-events-none">100</div>
-        <div className="font-display font-extrabold text-xl md:text-[28px] text-white tracking-tight mb-1 relative z-10">Welcome back, Arjun</div>
-        <div className="text-xs md:text-sm text-white/50 mb-4 md:mb-6 relative z-10">You&apos;re 34 reps into your FAANG goal. Keep the streak alive.</div>
+        <div className="absolute right-4 md:right-8 -top-2.5 font-display text-[80px] md:text-[120px] font-extrabold text-white/5 leading-none tracking-tight pointer-events-none">
+          100
+        </div>
+        <div className="font-display font-extrabold text-xl md:text-[28px] text-white tracking-tight mb-1 relative z-10">
+          Welcome back, {user?.name?.split(" ")[0] ?? "there"}
+        </div>
+        <div className="text-xs md:text-sm text-white/50 mb-4 md:mb-6 relative z-10">
+          {activeGoal
+            ? `You're ${repsDone} reps into your goal. Keep the streak alive.`
+            : "Start by posting your first goal."}
+        </div>
         <div className="grid grid-cols-2 sm:flex gap-4 md:gap-8 relative z-10">
-          <div>
-            <div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">34</div>
-            <div className="font-mono text-[10px] md:text-xs text-white/40">reps done</div>
-          </div>
-          <div>
-            <div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">66</div>
-            <div className="font-mono text-[10px] md:text-xs text-white/40">reps to go</div>
-          </div>
-          <div>
-            <div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">780</div>
-            <div className="font-mono text-[10px] md:text-xs text-white/40">trust score</div>
-          </div>
-          <div>
-            <div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">14</div>
-            <div className="font-mono text-[10px] md:text-xs text-white/40">day streak</div>
-          </div>
+          {[
+            { v: repsDone, l: "reps done" },
+            { v: repsLeft, l: "reps to go" },
+            { v: trustScore, l: "trust score" },
+            { v: streak, l: "day streak" },
+          ].map(({ v, l }) => (
+            <div key={l}>
+              <div className="font-display font-extrabold text-2xl md:text-[32px] text-white tracking-tight">
+                {v}
+              </div>
+              <div className="font-mono text-[10px] md:text-xs text-white/40">
+                {l}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Mobile tabs */}
       <div className="flex md:hidden gap-2 mb-4 overflow-x-auto pb-2">
         {[
-          { key: 'overview', label: 'Overview' },
-          { key: 'sessions', label: 'Sessions' },
-          { key: 'partners', label: 'Partners' },
-          { key: 'score', label: 'Trust' },
+          { key: "overview", label: "Overview" },
+          { key: "sessions", label: "Sessions" },
+          { key: "partners", label: "Partners" },
+          { key: "score", label: "Trust" },
         ].map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={cn(
               "px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap",
-              activeTab === tab.key ? "bg-ink text-white" : "bg-surface text-text2"
+              activeTab === tab.key
+                ? "bg-ink text-white"
+                : "bg-surface text-text2",
             )}
           >
             {tab.label}
@@ -61,21 +207,21 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] lg:grid-cols-[280px_1fr] gap-5 md:gap-6">
-        {/* Sidebar - Desktop only */}
+        {/* Sidebar */}
         <div className="hidden md:block">
           <div className="bg-ink rounded-[20px] p-4 sticky top-24">
             {[
-              { key: 'overview', icon: '◼', label: 'Overview' },
-              { key: 'sessions', icon: '◷', label: 'Sessions' },
-              { key: 'partners', icon: '◎', label: 'My Partners' },
-              { key: 'score', icon: '▲', label: 'Trust Score' },
+              { key: "overview", icon: "◼", label: "Overview" },
+              { key: "sessions", icon: "◷", label: "Sessions" },
+              { key: "partners", icon: "◎", label: "My Partners" },
+              { key: "score", icon: "▲", label: "Trust Score" },
             ].map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={cn(
                   "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-white/55 text-sm font-medium cursor-pointer transition-all hover:text-white hover:bg-white/5 mb-0.5",
-                  activeTab === tab.key && "text-white bg-white/10"
+                  activeTab === tab.key && "text-white bg-white/10",
                 )}
               >
                 <span className="text-base w-5 text-center">{tab.icon}</span>
@@ -83,7 +229,11 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
               </button>
             ))}
             <div className="h-px bg-white/10 my-3" />
-            <Button className="w-full" size="sm" onClick={() => onNavigate('post')}>
+            <Button
+              className="w-full"
+              size="sm"
+              onClick={() => onNavigate("post")}
+            >
               + Post new goal
             </Button>
           </div>
@@ -91,451 +241,1185 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
 
         {/* Content */}
         <div>
-          {activeTab === 'overview' && <OverviewTab onNavigate={onNavigate} setActiveTab={setActiveTab} />}
-          {activeTab === 'sessions' && <SessionsTab onNavigate={onNavigate} setShowAddTopicModal={setShowAddTopicModal} setActiveTab={setActiveTab} />}
-          {activeTab === 'partners' && <PartnersTab />}
-          {activeTab === 'score' && <TrustScoreTab />}
+          {activeTab === "overview" && (
+            <OverviewTab
+              onNavigate={onNavigate}
+              setActiveTab={setActiveTab}
+              activeGoal={activeGoal}
+              upcomingSessions={upcomingSessions}
+              stats={stats}
+              loading={dataLoading}
+            />
+          )}
+          {activeTab === "sessions" && (
+            <SessionsTab
+              onNavigate={onNavigate}
+              setShowAddTopicModal={setShowAddTopicModal}
+              setActiveTab={setActiveTab}
+              activeGoal={activeGoal}
+              loading={dataLoading}
+            />
+          )}
+          {activeTab === "partners" && <PartnersTab />}
+          {activeTab === "score" && (
+            <TrustScoreTab stats={stats} activeGoalId={activeGoal?.id} />
+          )}
         </div>
       </div>
 
       {/* Add Topic Modal */}
       {showAddTopicModal && (
-        <div className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setShowAddTopicModal(false)}>
-          <div className="bg-card rounded-t-[20px] md:rounded-[20px] p-6 md:p-8 w-full md:w-[480px] md:max-w-[90vw] animate-fade-up max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="font-display font-extrabold text-lg md:text-[22px] mb-1">Add a topic</div>
-            <div className="text-xs md:text-sm text-text2 mb-5 md:mb-6">Creates an open slot. The community sees it and applies to help you.</div>
+        <div
+          className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-50 flex items-end md:items-center justify-center p-0 md:p-4"
+          onClick={() => setShowAddTopicModal(false)}
+        >
+          <div
+            className="bg-card rounded-t-[20px] md:rounded-[20px] p-6 md:p-8 w-full md:w-[480px] md:max-w-[90vw] animate-fade-up max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="font-display font-extrabold text-lg md:text-[22px] mb-1">
+              Add a topic
+            </div>
+            <div className="text-xs md:text-sm text-text2 mb-5 md:mb-6">
+              Creates an open slot. The community sees it and applies to help
+              you.
+            </div>
             <div className="mb-4">
-              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Category</label>
+              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
+                Category
+              </label>
               <div className="flex flex-wrap gap-2">
-                {['DSA', 'System Design', 'Behavioral'].map((type) => (
-                  <button key={type} className="font-mono text-xs font-medium px-4 py-1.5 rounded-full border-[1.5px] border-primary text-primary bg-[#fff5f2] cursor-pointer">
+                {["DSA", "System Design", "Behavioral"].map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setAddTopicCategory(type)}
+                    className={cn(
+                      "font-mono text-xs font-medium px-4 py-1.5 rounded-full border-[1.5px] cursor-pointer transition-colors",
+                      addTopicCategory === type
+                        ? "border-primary text-primary bg-[#fff5f2]"
+                        : "border-border text-text2",
+                    )}
+                  >
                     {type}
                   </button>
                 ))}
               </div>
             </div>
             <div className="mb-4">
-              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Topic</label>
-              <input className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none" placeholder="e.g. Dynamic Programming — Knapsack" />
+              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
+                Topic
+              </label>
+              <input
+                value={addTopicTopic}
+                onChange={(e) => setAddTopicTopic(e.target.value)}
+                className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none"
+                placeholder="e.g. Dynamic Programming — Knapsack"
+              />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
               <div>
-                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Date & time</label>
-                <input type="datetime-local" className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none" />
+                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
+                  Date & time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={addTopicDate}
+                  onChange={(e) => setAddTopicDate(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none"
+                />
               </div>
               <div>
-                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Duration</label>
-                <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none cursor-pointer">
-                  <option>30 mins</option>
-                  <option>45 mins</option>
-                  <option>60 mins</option>
-                  <option>90 mins</option>
+                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
+                  Duration
+                </label>
+                <select
+                  value={addTopicDuration}
+                  onChange={(e) => setAddTopicDuration(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none cursor-pointer"
+                >
+                  <option value="30">30 mins</option>
+                  <option value="45">45 mins</option>
+                  <option value="60">60 mins</option>
+                  <option value="90">90 mins</option>
                 </select>
               </div>
             </div>
             <div className="mb-5">
-              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">Approval deadline</label>
-              <select className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none cursor-pointer">
-                <option>2h before</option>
-                <option>6h before</option>
-                <option>12h before</option>
-                <option>24h before</option>
+              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
+                Approval deadline
+              </label>
+              <select
+                value={addTopicDeadline}
+                onChange={(e) => setAddTopicDeadline(e.target.value)}
+                className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none cursor-pointer"
+              >
+                <option value="2h">2h before</option>
+                <option value="6h">6h before</option>
+                <option value="12h">12h before</option>
+                <option value="24h">24h before</option>
               </select>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setShowAddTopicModal(false)}>Cancel</Button>
-              <Button className="flex-[2]" onClick={() => setShowAddTopicModal(false)}>Post to community</Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowAddTopicModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-[2]"
+                disabled={
+                  addTopicLoading ||
+                  !addTopicTopic.trim() ||
+                  !addTopicDate ||
+                  !activeGoal?.id
+                }
+                onClick={handleAddTopic}
+              >
+                {addTopicLoading ? "Posting…" : "Post to community"}
+              </Button>
             </div>
+            {!activeGoal?.id && (
+              <p className="font-mono text-[11px] text-red mt-2">
+                No active goal found. Create a goal first, then add topics to
+                it.
+              </p>
+            )}
+            {addTopicError && (
+              <p className="font-mono text-[11px] text-red mt-2">
+                {addTopicError}
+              </p>
+            )}
           </div>
         </div>
       )}
     </div>
-  )
+  );
 }
 
-function OverviewTab({ onNavigate, setActiveTab }: { onNavigate: (screen: string) => void, setActiveTab: (tab: string) => void }) {
-  return (
-    <div>
-      {/* Active Goal */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="font-display font-bold text-base md:text-[17px]">Active goal</div>
-      </div>
-      <div className="bg-card border border-border rounded-[20px] p-4 md:p-6 mb-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-          <div>
-            <div className="font-display font-bold text-base md:text-[17px]">FAANG DSA Grind</div>
-            <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">Interview prep · DSA, System Design, Behavioral</div>
-          </div>
-          <span className="badge-green text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full self-start">Active</span>
-        </div>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-5 mb-4">
-          <div className="w-16 md:w-20 h-16 md:h-20 rounded-full flex items-center justify-center relative flex-shrink-0 mx-auto sm:mx-0" style={{ background: 'conic-gradient(var(--accent) 34%, var(--surface3) 0)' }}>
-            <div className="absolute w-12 md:w-16 h-12 md:h-16 rounded-full bg-card" />
-            <span className="font-display font-extrabold text-sm md:text-base z-10">34</span>
-          </div>
-          <div className="flex-1">
-            <div className="flex justify-between mb-2">
-              <span className="font-mono text-[10px] md:text-[11px] text-text3">Progress to 100 reps</span>
-              <span className="font-mono text-[10px] md:text-[11px] text-text3">34%</span>
-            </div>
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width: '34%' }} />
-            </div>
-            <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-2">~9 weeks remaining at current pace</div>
-          </div>
-        </div>
-        <div className="h-px bg-border my-4" />
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button size="sm" className="w-full sm:w-auto" onClick={() => onNavigate('session')}>Start today&apos;s session</Button>
-          <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setActiveTab('sessions')}>View roadmap</Button>
-        </div>
-      </div>
-
-      {/* Upcoming Sessions */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="font-display font-bold text-base md:text-[17px]">Upcoming sessions</div>
-        <button className="font-mono text-xs text-primary cursor-pointer" onClick={() => setActiveTab('sessions')}>View all</button>
-      </div>
-      <div className="flex flex-col gap-2 mb-6">
-        <div className="bg-card border border-border rounded-xl px-4 md:px-5 py-3 md:py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-          <div className="font-mono text-xs text-text2 sm:min-w-[60px]">Today · 6:00 PM</div>
-          <div className="flex-1">
-            <div className="font-semibold text-sm">Trees — BFS & DFS</div>
-            <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">Session #35 · with Rahul Krishnan</div>
-          </div>
-          <div className="flex items-center gap-2 mt-2 sm:mt-0">
-            <span className="badge-dsa text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full">DSA</span>
-            <Button size="sm" onClick={() => onNavigate('session')}>Join</Button>
-          </div>
-        </div>
-        <div className="bg-card border border-border rounded-xl px-4 md:px-5 py-3 md:py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-          <div className="font-mono text-xs text-text2 sm:min-w-[60px]">Thu · 7:00 PM</div>
-          <div className="flex-1">
-            <div className="font-semibold text-sm">Trees — Lowest Common Ancestor</div>
-            <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">Session #36 · Priya applied — <span className="text-[#c17800]">approval pending</span></div>
-          </div>
-          <div className="flex items-center gap-2 mt-2 sm:mt-0">
-            <span className="badge-dsa text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full">DSA</span>
-            <Button variant="outline" size="sm" onClick={() => setActiveTab('score')}>Review</Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="font-display font-bold text-base md:text-[17px]">Recent activity</div>
-      </div>
-      <div className="flex flex-col">
-        {[
-          { icon: '✓', bg: 'bg-green-bg', title: 'Session #34 completed — Binary Search', sub: 'Yesterday · Rahul rated you 5/5 ·', change: '+12 pts', up: true },
-          { icon: '⟡', bg: 'bg-[#fff0e8]', title: 'Priya Venkat applied to Session #36', sub: '1h ago · Trees: LCA', action: 'Review application' },
-          { icon: '★', bg: 'bg-blue-bg', title: '14-day streak reached', sub: '2 days ago ·', change: '+25 pts bonus', up: true },
-        ].map((item, i) => (
-          <div key={i} className="flex gap-3 py-3 md:py-3.5 border-b border-border/50 last:border-b-0">
-            <div className={`w-8 md:w-9 h-8 md:h-9 rounded-xl ${item.bg} flex items-center justify-center text-sm md:text-base flex-shrink-0`}>{item.icon}</div>
-            <div>
-              <div className="text-sm font-medium">{item.title}</div>
-              <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">
-                {item.sub}
-                {item.change && <span className={item.up ? 'text-green' : 'text-red'}> {item.change}</span>}
-                {item.action && <span className="text-primary cursor-pointer" onClick={() => setActiveTab('score')}> {item.action}</span>}
-              </div>
-            </div>
+function OverviewTab({
+  onNavigate,
+  setActiveTab,
+  activeGoal,
+  upcomingSessions,
+  stats,
+  loading,
+}: {
+  onNavigate: (s: string) => void;
+  setActiveTab: (t: string) => void;
+  activeGoal: Goal | null;
+  upcomingSessions: Session[];
+  stats: UserStats | null;
+  loading: boolean;
+}) {
+  if (loading)
+    return (
+      <div className="flex flex-col gap-3">
+        {[1, 2].map((i) => (
+          <div
+            key={i}
+            className="bg-card border border-border rounded-[20px] p-6 animate-pulse"
+          >
+            <div className="h-4 w-3/4 bg-surface3 rounded mb-3" />
+            <div className="h-3 w-full bg-surface3 rounded" />
           </div>
         ))}
       </div>
+    );
+
+  const repsDone = stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
+  const repsTotal = activeGoal?.repsTotal ?? 100;
+  const pct = Math.round((repsDone / repsTotal) * 100);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="font-display font-bold text-base md:text-[17px]">
+          Active goal
+        </div>
+      </div>
+      {activeGoal ? (
+        <div className="bg-card border border-border rounded-[20px] p-4 md:p-6 mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+              <div className="font-display font-bold text-base md:text-[17px]">
+                {activeGoal.title}
+              </div>
+              <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">
+                {catLabel(activeGoal.category)}
+              </div>
+            </div>
+            <span className="badge-green text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full self-start">
+              Active
+            </span>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-5 mb-4">
+            <div
+              className="w-16 md:w-20 h-16 md:h-20 rounded-full flex items-center justify-center relative flex-shrink-0 mx-auto sm:mx-0"
+              style={{
+                background: `conic-gradient(var(--accent) ${pct}%, var(--surface3) 0)`,
+              }}
+            >
+              <div className="absolute w-12 md:w-16 h-12 md:h-16 rounded-full bg-card" />
+              <span className="font-display font-extrabold text-sm md:text-base z-10">
+                {repsDone}
+              </span>
+            </div>
+            <div className="flex-1">
+              <div className="flex justify-between mb-2">
+                <span className="font-mono text-[10px] md:text-[11px] text-text3">
+                  Progress to {repsTotal} reps
+                </span>
+                <span className="font-mono text-[10px] md:text-[11px] text-text3">
+                  {pct}%
+                </span>
+              </div>
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-2">
+                {repsTotal - repsDone} reps remaining
+              </div>
+            </div>
+          </div>
+          <div className="h-px bg-border my-4" />
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() =>
+                onNavigate(
+                  upcomingSessions[0]?.id
+                    ? `session:${upcomingSessions[0].id}`
+                    : "session",
+                )
+              }
+            >
+              Start today&apos;s session
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => setActiveTab("sessions")}
+            >
+              View roadmap
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-card border border-dashed border-border rounded-[20px] p-6 mb-4 text-center">
+          <div className="text-2xl mb-2">◌</div>
+          <div className="font-mono text-sm text-text3 mb-4">
+            No active goal yet. Post your first goal to get started.
+          </div>
+          <Button size="sm" onClick={() => onNavigate("post")}>
+            + Post a goal
+          </Button>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="font-display font-bold text-base md:text-[17px]">
+          Upcoming sessions
+        </div>
+        <button
+          className="font-mono text-xs text-primary cursor-pointer"
+          onClick={() => setActiveTab("sessions")}
+        >
+          View all
+        </button>
+      </div>
+      {upcomingSessions.length === 0 ? (
+        <p className="text-sm text-text3 mb-6">No upcoming sessions.</p>
+      ) : (
+        <div className="flex flex-col gap-2 mb-6">
+          {upcomingSessions.slice(0, 3).map((s) => (
+            <div
+              key={s.id}
+              className="bg-card border border-border rounded-xl px-4 md:px-5 py-3 md:py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4"
+            >
+              <div className="font-mono text-xs text-text2 sm:min-w-[60px]">
+                {formatScheduled(s.scheduledAt ?? s.scheduledDate ?? "")}
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold text-sm">{s.topic}</div>
+                <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">
+                  {s.partner
+                    ? `With ${(s.approvedHelper ?? s.partner)!.name}`
+                    : s.sessionNumber
+                      ? `Session #${s.sessionNumber}`
+                      : "Session upcoming"}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                <span
+                  className={`${catBadgeClass(s.category)} text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full`}
+                >
+                  {catLabel(s.category)}
+                </span>
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    onNavigate(
+                      upcomingSessions[0]?.id
+                        ? `session:${upcomingSessions[0].id}`
+                        : "session",
+                    )
+                  }
+                >
+                  Join
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="font-display font-bold text-base md:text-[17px]">
+          Trust score
+        </div>
+      </div>
+      <div className="bg-card border border-border rounded-[20px] p-4 md:p-5">
+        <div className="flex items-center gap-4">
+          <div className="text-center">
+            <div className="font-display font-extrabold text-4xl md:text-5xl text-green tracking-tight">
+              {stats?.trustScore ?? 500}
+            </div>
+            <div className="font-mono text-[10px] md:text-xs text-text3 mt-1">
+              your score
+            </div>
+          </div>
+          <div className="flex-1">
+            <div className="flex justify-between font-mono text-[10px] md:text-[11px] text-text3 mb-1.5">
+              <span>{stats?.sessionsCompleted ?? 0} sessions completed</span>
+            </div>
+            <div className="flex justify-between font-mono text-[10px] md:text-[11px] text-text3 mb-1.5">
+              <span>
+                {stats?.showUpRate != null
+                  ? `${Math.round(stats.showUpRate * 100)}% show-up rate`
+                  : ""}
+              </span>
+            </div>
+            <div className="flex justify-between font-mono text-[10px] md:text-[11px] text-text3">
+              <span>{stats?.currentStreak ?? 0}-day streak</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-  )
+  );
 }
 
-function SessionsTab({ onNavigate, setShowAddTopicModal, setActiveTab }: { onNavigate: (screen: string) => void, setShowAddTopicModal: (show: boolean) => void, setActiveTab: (tab: string) => void }) {
+function SessionsTab({
+  onNavigate,
+  setShowAddTopicModal,
+  setActiveTab,
+  activeGoal,
+  loading,
+}: {
+  onNavigate: (s: string) => void;
+  setShowAddTopicModal: (b: boolean) => void;
+  setActiveTab: (t: string) => void;
+  activeGoal: Goal | null;
+  loading: boolean;
+}) {
+  const [goalDetail, setGoalDetail] = useState<GoalDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [allSessions, setAllSessions] = useState<Session[]>([]);
+
+  useEffect(() => {
+    if (!activeGoal?.id) return;
+    setDetailLoading(true);
+    Promise.all([
+      api.goals.get(activeGoal.id),
+      api.sessions.getMySessions({ role: "owner", limit: 100 }),
+    ])
+      .then(([gd, sd]) => {
+        setGoalDetail(gd.goal);
+        setAllSessions(sd.sessions);
+      })
+      .catch(console.error)
+      .finally(() => setDetailLoading(false));
+  }, [activeGoal?.id]);
+
+  if (loading || detailLoading)
+    return (
+      <div className="flex flex-col gap-3">
+        {[1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="bg-card border border-border rounded-xl p-4 animate-pulse"
+          >
+            <div className="h-3.5 w-3/4 bg-surface3 rounded" />
+          </div>
+        ))}
+      </div>
+    );
+  if (!activeGoal)
+    return (
+      <div className="text-sm text-text3">
+        No active goal.{" "}
+        <span
+          className="text-primary cursor-pointer"
+          onClick={() => onNavigate("post")}
+        >
+          Post one →
+        </span>
+      </div>
+    );
+
+  const sessions = goalDetail?.sessions ?? [];
+  const repsDone = goalDetail?.repsDone ?? 0,
+    repsTotal = goalDetail?.repsTotal ?? 100;
+
+  // Group sessions by category
+  const grouped: Record<string, (typeof sessions)[0][]> = {};
+  for (const s of sessions) {
+    const c = (s.category || activeGoal.category)
+      .toLowerCase()
+      .replace(/\s/g, "");
+    if (!grouped[c]) grouped[c] = [];
+    grouped[c].push(s);
+  }
+  const accents: Record<string, { text: string; bar: string; label: string }> =
+    {
+      dsa: { text: "text-blue", bar: "bg-blue", label: "DSA" },
+      systemdesign: {
+        text: "text-[#6b34d6]",
+        bar: "bg-[#6b34d6]",
+        label: "System Design",
+      },
+      behavioral: {
+        text: "text-[#c17800]",
+        bar: "bg-[#c17800]",
+        label: "Behavioral",
+      },
+    };
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-        <div className="font-display font-bold text-base md:text-[17px]">Your 100-rep roadmap</div>
-        <Button size="sm" onClick={() => setShowAddTopicModal(true)}>+ Add topic</Button>
-      </div>
-      <div className="text-xs md:text-sm text-text2 mb-4">Each topic is one session slot. Add up to 100. The community applies to help you — you approve who shows up.</div>
-
-      {/* DSA Section */}
-      <div className="flex items-center gap-2.5 py-1.5 mb-2 border-b border-border/50">
-        <span className="font-mono text-[11px] font-medium text-blue">DSA</span>
-        <div className="flex-1 h-0.5 bg-surface3 rounded overflow-hidden">
-          <div className="h-full w-[62%] bg-blue rounded" />
+        <div className="font-display font-bold text-base md:text-[17px]">
+          Your {repsTotal}-rep roadmap
         </div>
-        <span className="font-mono text-[10px] md:text-[11px] text-text3">21 / 34 done</span>
+        <Button size="sm" onClick={() => setShowAddTopicModal(true)}>
+          + Add topic
+        </Button>
       </div>
-      <div className="flex flex-col gap-1.5 mb-4">
-        <SessionCard done topic="Arrays — Two Pointer" subtitle="Mar 1 · Rahul Krishnan" badge="DSA" points="+12" />
-        <SessionCard done topic="Arrays — Sliding Window" subtitle="Mar 3 · Neha Venkat" badge="DSA" points="+10" />
-        <SessionCard live topic="Trees — BFS & DFS" subtitle="Session #35 · Rahul Krishnan" badge="DSA" onJoin={() => onNavigate('session')} />
-        <SessionCard pending topic="Trees — Lowest Common Ancestor" subtitle="Session #36 · Priya applied — expires in 4h" time="Thu 7 PM" onReview={() => setActiveTab('score')} />
-        <SessionCard open topic="Graphs — BFS Shortest Path" subtitle="Session #37 · Fri Mar 21 · No applicants yet" badge="DSA" />
-        <AddTopicButton label="Add DSA topic — Graphs, DP, Backtracking, Heaps..." onClick={() => setShowAddTopicModal(true)} />
+      <div className="text-xs md:text-sm text-text2 mb-4">
+        Each topic is one session slot. The community applies to help you — you
+        approve who shows up.
       </div>
-
-      {/* System Design Section */}
-      <div className="flex items-center gap-2.5 py-1.5 mb-2 border-b border-border/50">
-        <span className="font-mono text-[11px] font-medium text-[#6b34d6]">System Design</span>
-        <div className="flex-1 h-0.5 bg-surface3 rounded overflow-hidden">
-          <div className="h-full w-[30%] bg-[#6b34d6] rounded" />
+      {sessions.length === 0 ? (
+        <div className="text-sm text-text3">
+          No sessions yet. Add topics above to get started.
         </div>
-        <span className="font-mono text-[10px] md:text-[11px] text-text3">9 / 30 done</span>
-      </div>
-      <div className="flex flex-col gap-1.5 mb-4">
-        <SessionCard done topic="Design a URL Shortener" subtitle="Mar 5 · Aditya Mehta" badge="Design" points="+15" />
-        <SessionCard pending topic="Design Twitter Feed" subtitle="Session #11 · 2 applicants — expires in 8h" time="Sat 5 PM" onReview={() => setActiveTab('score')} />
-        <SessionCard open topic="Design a Rate Limiter" subtitle="Session #12 · Mon Mar 24 · No applicants yet" badge="Design" />
-        <AddTopicButton label="Add System Design topic — Chat app, CDN, Search engine..." onClick={() => setShowAddTopicModal(true)} />
-      </div>
-
-      {/* Behavioral Section */}
-      <div className="flex items-center gap-2.5 py-1.5 mb-2 border-b border-border/50">
-        <span className="font-mono text-[11px] font-medium text-[#c17800]">Behavioral</span>
-        <div className="flex-1 h-0.5 bg-surface3 rounded overflow-hidden">
-          <div className="h-full w-[11%] bg-[#c17800] rounded" />
-        </div>
-        <span className="font-mono text-[10px] md:text-[11px] text-text3">4 / 36 done</span>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <SessionCard done topic="Leadership & Ownership stories" subtitle="Mar 8 · Sana Khan" badge="Behavioral" points="+8" />
-        <SessionCard open topic="Conflict Resolution — STAR method" subtitle="Session #6 · Tue Mar 25 · No applicants yet" badge="Behavioral" />
-        <AddTopicButton label="Add Behavioral topic — Failure, Teamwork, Growth mindset..." onClick={() => setShowAddTopicModal(true)} />
-      </div>
+      ) : (
+        Object.entries(grouped).map(([cat, catSessions]) => {
+          const done = catSessions.filter(
+            (s) => s.status === "completed",
+          ).length;
+          const a = accents[cat] ?? {
+            text: "text-text2",
+            bar: "bg-primary",
+            label: catLabel(cat),
+          };
+          const pct =
+            catSessions.length > 0
+              ? Math.round((done / catSessions.length) * 100)
+              : 0;
+          return (
+            <div key={cat} className="mb-4">
+              <div className="flex items-center gap-2.5 py-1.5 mb-2 border-b border-border/50">
+                <span className={`font-mono text-[11px] font-medium ${a.text}`}>
+                  {a.label}
+                </span>
+                <div className="flex-1 h-0.5 bg-surface3 rounded overflow-hidden">
+                  <div
+                    className={`h-full ${a.bar} rounded`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className="font-mono text-[10px] md:text-[11px] text-text3">
+                  {done} / {catSessions.length} done
+                </span>
+              </div>
+              <div className="flex flex-col gap-1.5 mb-2">
+                {catSessions.map((s) => {
+                  const isDone = s.status === "completed";
+                  const isLive = s.status === "live";
+                  const hasPending =
+                    (s.appCount ?? s.applicationsCount ?? 0) > 0 &&
+                    !isLive &&
+                    !isDone;
+                  const badge = catLabel(s.category || cat),
+                    bc = catBadgeClass(s.category || cat);
+                  const scheduled = s.scheduledAt ?? s.scheduledDate;
+                  const shortDate = scheduled
+                    ? new Date(scheduled).toLocaleDateString("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "";
+                  const shortTime = scheduled
+                    ? new Date(scheduled).toLocaleTimeString("en-US", {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : "";
+                  if (isDone)
+                    return (
+                      <div
+                        key={s.id}
+                        className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-4 opacity-60"
+                      >
+                        <div className="flex-shrink-0 w-10 text-center">
+                          <div className="w-7 h-7 rounded-full bg-green/10 flex items-center justify-center mx-auto">
+                            <span className="text-green font-bold text-sm">
+                              ✓
+                            </span>
+                          </div>
+                          <div className="font-mono text-[10px] text-text3 mt-1 leading-tight">
+                            {shortDate}
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm">{s.topic}</div>
+                          <div className="font-mono text-[10px] text-text3 mt-0.5">
+                            {[
+                              s.sessionNumber
+                                ? `Session #${s.sessionNumber}`
+                                : null,
+                              (s.approvedHelper ?? s.partner)?.name,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </div>
+                        {s.earnedPoints != null && (
+                          <span className="font-mono text-xs font-semibold text-green bg-green/10 px-2.5 py-0.5 rounded-full flex-shrink-0">
+                            +{s.earnedPoints} pts
+                          </span>
+                        )}
+                      </div>
+                    );
+                  if (isLive)
+                    return (
+                      <div
+                        key={s.id}
+                        className="bg-card border-[1.5px] border-primary rounded-xl px-4 py-3 flex items-center gap-4"
+                      >
+                        <div className="flex-shrink-0 sm:min-w-[80px]">
+                          <div className="font-mono text-xs font-medium text-primary">
+                            Live now
+                          </div>
+                          <div className="font-mono text-[10px] text-text3">
+                            {shortDate}
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm flex items-center gap-1.5">
+                            {s.topic}
+                            <span className="badge-green text-[10px] font-mono px-2 py-0.5 rounded-full">
+                              Live
+                            </span>
+                          </div>
+                          <div className="font-mono text-[10px] text-text3 mt-0.5">
+                            {[
+                              s.sessionNumber
+                                ? `Session #${s.sessionNumber}`
+                                : null,
+                              (s.approvedHelper ?? s.partner)?.name,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => onNavigate(`session:${s.id}`)}
+                        >
+                          Join →
+                        </Button>
+                      </div>
+                    );
+                  if (hasPending) {
+                    const expiry = expiresIn(s.approvalDeadline);
+                    return (
+                      <div
+                        key={s.id}
+                        className="bg-[#fffbf2] border border-[#c17800] rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4"
+                      >
+                        <div className="flex-shrink-0 sm:min-w-[80px]">
+                          <div className="font-mono text-xs font-medium text-[#c17800]">
+                            {shortDate}
+                          </div>
+                          <div className="font-mono text-[10px] text-[#c17800]/70">
+                            {shortTime}
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm">{s.topic}</div>
+                          <div className="font-mono text-[10px] text-[#c17800] mt-0.5">
+                            {s.sessionNumber
+                              ? `Session #${s.sessionNumber} · `
+                              : ""}
+                            {s.firstApplicant
+                              ? `${s.firstApplicant.name} applied`
+                              : `${s.appCount ?? s.applicationsCount} applied`}
+                            {expiry ? ` — expires in ${expiry}` : ""}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          className="bg-[#fff3e0] text-[#c17800] border border-[#c17800] hover:bg-[#fff0d4]"
+                          onClick={() => setActiveTab("score")}
+                        >
+                          Review
+                        </Button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div
+                      key={s.id}
+                      className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-4"
+                    >
+                      <div className="flex-shrink-0 sm:min-w-[80px]">
+                        <div className="font-mono text-[11px] text-text3">
+                          {shortDate}
+                        </div>
+                        <div className="font-mono text-[10px] text-text3">
+                          {shortTime}
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm">{s.topic}</div>
+                        <div className="font-mono text-[10px] text-text3 mt-0.5">
+                          {[
+                            s.sessionNumber
+                              ? `Session #${s.sessionNumber}`
+                              : null,
+                            shortDate || null,
+                            "No applicants yet",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                      </div>
+                      <span
+                        className={`${bc} text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full flex-shrink-0`}
+                      >
+                        {badge}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div
+                  onClick={() => setShowAddTopicModal(true)}
+                  className="flex items-center gap-2 px-3.5 py-2.5 border-[1.5px] border-dashed border-border rounded-xl cursor-pointer transition-colors hover:border-primary"
+                >
+                  <span className="text-base text-text3">+</span>
+                  <span className="font-mono text-[10px] md:text-xs text-text3">
+                    Add {a.label} topic…
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
-  )
-}
-
-function SessionCard({ done, live, pending, open, topic, subtitle, badge, points, time, onJoin, onReview }: { done?: boolean, live?: boolean, pending?: boolean, open?: boolean, topic: string, subtitle: string, badge?: string, points?: string, time?: string, onJoin?: () => void, onReview?: () => void }) {
-  const badgeClass = badge === 'DSA' ? 'badge-dsa' : badge === 'Design' ? 'badge-design' : 'badge-behavioral'
-  
-  return (
-    <div className={cn(
-      "bg-card border border-border rounded-xl px-3 md:px-5 py-3 md:py-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4",
-      done && "opacity-50",
-      live && "border-[1.5px] border-primary",
-      pending && "border-[#c17800] bg-[#fffbf2]"
-    )}>
-      <div className={cn(
-        "font-mono text-xs sm:min-w-[60px]",
-        done && "text-green",
-        pending && "text-[#c17800]",
-        open && "text-red"
-      )}>
-        {done ? '✓' : live ? 'Today 6 PM' : pending ? time : 'Open'}
-      </div>
-      <div className="flex-1">
-        <div className="font-semibold text-sm">
-          {topic}
-          {live && <span className="badge-green text-[10px] font-mono font-medium px-2 py-0.5 rounded-full ml-1.5">Live</span>}
-        </div>
-        <div className={cn("font-mono text-[10px] md:text-[11px] mt-1", pending ? "text-[#c17800]" : "text-text3")}>{subtitle}</div>
-      </div>
-      <div className="flex items-center gap-2 mt-2 sm:mt-0">
-        {done && badge && (
-          <>
-            <span className={`${badgeClass} text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full`}>{badge}</span>
-            {points && <span className="font-mono text-[13px] font-medium text-green">{points}</span>}
-          </>
-        )}
-        {live && <Button size="sm" onClick={onJoin}>Join</Button>}
-        {pending && <Button size="sm" className="bg-[#fff3e0] text-[#c17800] border border-[#c17800] hover:bg-[#fff3e0]/80" onClick={onReview}>Review</Button>}
-        {open && badge && <span className={`${badgeClass} text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full`}>{badge}</span>}
-      </div>
-    </div>
-  )
-}
-
-function AddTopicButton({ label, onClick }: { label: string, onClick: () => void }) {
-  return (
-    <div 
-      onClick={onClick}
-      className="flex items-center gap-2 px-3.5 py-2.5 border-[1.5px] border-dashed border-border rounded-xl cursor-pointer transition-colors hover:border-primary"
-    >
-      <span className="text-base text-text3">+</span>
-      <span className="font-mono text-[10px] md:text-xs text-text3">{label}</span>
-    </div>
-  )
+  );
 }
 
 function PartnersTab() {
-  const partners = [
-    { initials: 'RK', name: 'Rahul Krishnan', sessions: 9, topics: 'DSA — Arrays, Strings, Trees (today)', badges: ['Arrays', 'Strings', 'Trees'], trust: 892, color: 'av-purple' },
-    { initials: 'NV', name: 'Neha Venkat', sessions: 5, topics: 'DSA + System Design', badges: ['Sliding Window', 'URL Shortener'], trust: 741, color: 'av-green' },
-    { initials: 'AM', name: 'Aditya Mehta', sessions: 3, topics: 'System Design', badges: ['URL Shortener', 'Twitter Feed (upcoming)'], trust: 761, color: 'av-blue' },
-    { initials: 'SK', name: 'Sana Khan', sessions: 2, topics: 'Behavioral', badges: ['Leadership', 'Ownership'], trust: 698, color: 'av-orange' },
-  ]
+  const [partners, setPartners] = useState<Partner[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  return (
-    <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-        <div className="font-display font-bold text-base md:text-[17px]">My Partners</div>
-        <span className="font-mono text-[10px] md:text-[11px] text-text3">12 people have helped on your goal</span>
-      </div>
+  useEffect(() => {
+    api.partners
+      .getMyPartners({ limit: 20 })
+      .then((d) => setPartners(d.partners))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading)
+    return (
       <div className="flex flex-col gap-2">
-        {partners.map((p) => (
-          <div key={p.name} className="bg-card border border-border rounded-xl p-3 md:p-4 cursor-pointer hover:shadow-md transition-shadow">
-            <div className="flex items-start gap-3">
-              <div className={`w-9 md:w-10 h-9 md:h-10 rounded-full ${p.color} flex items-center justify-center font-display font-extrabold text-xs md:text-sm flex-shrink-0`}>
-                {p.initials}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold">{p.name}</div>
-                <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">{p.sessions} sessions · {p.topics}</div>
-                <div className="flex gap-1 md:gap-1.5 mt-2 flex-wrap">
-                  {p.badges.map((b) => (
-                    <span key={b} className="badge-dsa text-[10px] font-mono font-medium px-2 py-0.5 rounded-full">{b}</span>
-                  ))}
-                </div>
-              </div>
-              <div className={`flex items-center gap-1 md:gap-1.5 font-display font-extrabold text-base md:text-lg ${p.trust >= 750 ? 'trust-high' : 'trust-mid'}`}>
-                <div className={`w-1.5 md:w-2 h-1.5 md:h-2 rounded-full ${p.trust >= 750 ? 'bg-green' : 'bg-[#c17800]'}`} />
-                {p.trust}
-              </div>
-            </div>
+        {[1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="bg-card border border-border rounded-xl p-4 animate-pulse"
+          >
+            <div className="h-3.5 w-3/4 bg-surface3 rounded" />
           </div>
         ))}
-        {/* Pending */}
-        <div className="bg-card border border-[#c17800] bg-[#fffbf2] rounded-xl p-3 md:p-4 cursor-pointer">
-          <div className="flex items-start gap-3">
-            <div className="w-9 md:w-10 h-9 md:h-10 rounded-full bg-[#fff3e0] text-[#c17800] flex items-center justify-center font-display font-extrabold text-xs md:text-sm flex-shrink-0">PV</div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold">
-                Priya Venkat 
-                <span className="badge text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-[#fff3e0] text-[#c17800] ml-1.5">Pending</span>
-              </div>
-              <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">Applied for Session #36 · Trees: LCA · Thu 7 PM</div>
-              <div className="flex gap-1.5 mt-2">
-                <span className="badge-dsa text-[10px] font-mono font-medium px-2 py-0.5 rounded-full">Trees: LCA — awaiting</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 font-display font-extrabold text-base md:text-lg trust-high">
-              <div className="w-1.5 md:w-2 h-1.5 md:h-2 rounded-full bg-green" />
-              834
-            </div>
-          </div>
-        </div>
       </div>
-    </div>
-  )
-}
+    );
 
-function TrustScoreTab() {
   return (
     <div>
-      {/* Trust Score Section */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="font-display font-bold text-base md:text-[17px]">Trust score</div>
-      </div>
-      <div className="bg-card border border-border rounded-[20px] p-4 md:p-6 mb-4">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="text-center sm:text-left">
-            <div className="font-display font-extrabold text-4xl md:text-5xl text-green tracking-tight">780</div>
-            <div className="font-mono text-[10px] md:text-xs text-text3 mt-1">your score</div>
-          </div>
-          <div className="flex-1">
-            <div className="text-xs md:text-sm text-text2 mb-2">Score breakdown</div>
-            <div className="flex justify-between font-mono text-[10px] md:text-[11px] text-text3 mb-2">
-              <span>Sessions completed</span>
-              <span className="text-green">+340</span>
-            </div>
-            <div className="flex justify-between font-mono text-[10px] md:text-[11px] text-text3 mb-2">
-              <span>Quality feedback given</span>
-              <span className="text-green">+120</span>
-            </div>
-            <div className="flex justify-between font-mono text-[10px] md:text-[11px] text-text3 mb-2">
-              <span>Streak bonuses</span>
-              <span className="text-green">+45</span>
-            </div>
-            <div className="flex justify-between font-mono text-[10px] md:text-[11px] text-text3">
-              <span>Missed sessions (2x)</span>
-              <span className="text-red">-50</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="bg-surface rounded-[20px] p-4 md:p-5 mb-6">
-        <div className="font-mono text-[11px] text-text3 mb-3">Score tiers</div>
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-3"><div className="w-2 h-2 rounded-full bg-green" /><span className="text-xs md:text-sm"><strong>750+</strong> — Highly reliable, shown first in open slots</span></div>
-          <div className="flex items-center gap-3"><div className="w-2 h-2 rounded-full bg-[#c17800]" /><span className="text-xs md:text-sm"><strong>500–749</strong> — Reliable. Occasionally missed sessions.</span></div>
-          <div className="flex items-center gap-3"><div className="w-2 h-2 rounded-full bg-red" /><span className="text-xs md:text-sm"><strong>Below 500</strong> — Risky. Shown last in feed.</span></div>
-        </div>
-      </div>
-
-      {/* Pending Applicants */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-        <div className="font-display font-bold text-base md:text-[17px]">Pending applicants</div>
-        <span className="badge-red text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full self-start">3 waiting</span>
+        <div className="font-display font-bold text-base md:text-[17px]">
+          My Partners
+        </div>
+        <span className="font-mono text-[10px] md:text-[11px] text-text3">
+          {partners.length} partner{partners.length !== 1 ? "s" : ""}
+        </span>
       </div>
-      <div className="text-xs md:text-sm text-text2 mb-4">People who applied to help with a specific session. Approve one per slot before the deadline — unanswered slots re-open to the community.</div>
-
-      {/* Session #36 */}
-      <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-2 px-2 md:px-3 py-1.5 bg-surface2 rounded-md inline-block">
-        Session #36 — Trees: LCA · Thu 7:00 PM · <span className="text-red">expires in 4h</span>
-      </div>
-      <ApplicantCard 
-        initials="PV" 
-        name="Priya Venkat" 
-        trust={834} 
-        showUp="100%" 
-        sessions={28}
-        message="Strong in trees — helped 4 people on LCA. Will walk through recursive and iterative approaches and push on edge cases."
-        urgent
-        color="av-blue"
-      />
-
-      {/* Session #11 */}
-      <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-4 mb-2 px-2 md:px-3 py-1.5 bg-surface2 rounded-md inline-block">
-        Session #11 — System Design: Twitter Feed · Sat 5:00 PM · 2 applicants · <span className="text-red">expires in 8h</span>
-      </div>
-      <ApplicantCard 
-        initials="AM" 
-        name="Aditya Mehta" 
-        trust={761} 
-        showUp="95%" 
-        sessions={19}
-        message="Designed feed ranking at work. Will challenge you on fanout, cache invalidation, and pagination. Expect hard follow-ups."
-        color="av-orange"
-      />
-      <ApplicantCard 
-        initials="MK" 
-        name="Meera K" 
-        trust={612} 
-        showUp="87%" 
-        sessions={8}
-        message="Learning system design myself — teaching it reinforces my own understanding. Will prepare thoroughly."
-        color="av-green"
-      />
+      {partners.length === 0 ? (
+        <p className="text-sm text-text3">
+          No partners yet. Complete sessions to build your partner list.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {partners.map((p) => {
+            const uId = p.user?.id ?? p.id ?? "";
+            const uName = p.user?.name ?? p.name ?? "?";
+            const uTrustScore = p.user?.trustScore ?? p.trustScore ?? 0;
+            const uTopics = p.topics ?? [];
+            const color = avatarColors(uId),
+              tl = uTrustScore >= 750 ? "trust-high" : "trust-mid",
+              dot = uTrustScore >= 750 ? "bg-green" : "bg-[#c17800]";
+            return (
+              <div
+                key={uId}
+                className="bg-card border border-border rounded-xl p-3 md:p-4 cursor-pointer hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`w-9 md:w-10 h-9 md:h-10 rounded-full ${color} flex items-center justify-center font-display font-extrabold text-xs md:text-sm flex-shrink-0`}
+                  >
+                    {getInitials(uName)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold">{uName}</div>
+                    <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">
+                      {p.sessionsCount} session
+                      {p.sessionsCount !== 1 ? "s" : ""}
+                    </div>
+                    {uTopics.length > 0 && (
+                      <div className="flex gap-1 md:gap-1.5 mt-2 flex-wrap">
+                        {uTopics.slice(0, 3).map((t) => (
+                          <span
+                            key={t}
+                            className="badge-dsa text-[10px] font-mono font-medium px-2 py-0.5 rounded-full"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div
+                    className={`flex items-center gap-1 md:gap-1.5 font-display font-extrabold text-base md:text-lg ${tl}`}
+                  >
+                    <div
+                      className={`w-1.5 md:w-2 h-1.5 md:h-2 rounded-full ${dot}`}
+                    />
+                    {uTrustScore}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
-  )
+  );
 }
 
-function ApplicantCard({ initials, name, trust, showUp, sessions, message, urgent, color }: { initials: string, name: string, trust: number, showUp: string, sessions: number, message: string, urgent?: boolean, color: string }) {
+function TrustScoreTab({
+  stats,
+  activeGoalId,
+}: {
+  stats: UserStats | null;
+  activeGoalId: string | undefined;
+}) {
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [appLoading, setAppLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeGoalId) return;
+    setAppLoading(true);
+    api.applications
+      .getForGoal(activeGoalId)
+      .then((d) =>
+        setApplications(d.applications.filter((a) => a.status === "pending")),
+      )
+      .catch(console.error)
+      .finally(() => setAppLoading(false));
+  }, [activeGoalId]);
+
+  const handleApprove = async (id: string) => {
+    try {
+      await api.applications.approve(id);
+      setApplications((prev) => prev.filter((a) => a.id !== id));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const handleReject = async (id: string) => {
+    try {
+      await api.applications.reject(id);
+      setApplications((prev) => prev.filter((a) => a.id !== id));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Group by session slot
+  const slotMap = new Map<
+    string,
+    { session: Application["session"]; apps: Application[] }
+  >();
+  const ungrouped: Application[] = [];
+  for (const app of applications) {
+    const rawSid = app.session?.id ?? app.sessionId;
+    const sid = rawSid ? String(rawSid) : null;
+    if (sid) {
+      if (!slotMap.has(sid))
+        slotMap.set(sid, { session: app.session, apps: [] });
+      slotMap.get(sid)!.apps.push(app);
+    } else {
+      ungrouped.push(app);
+    }
+  }
+
+  const breakdown = stats?.scoreBreakdown;
+  const scoreRows = breakdown
+    ? [
+        {
+          l: "Sessions completed",
+          v: `+${breakdown.sessionsPoints}`,
+          up: true,
+        },
+        {
+          l: "Quality feedback given",
+          v: `+${breakdown.feedbackPoints}`,
+          up: true,
+        },
+        { l: "Streak bonuses", v: `+${breakdown.streakPoints}`, up: true },
+        {
+          l: `Missed sessions (${breakdown.missedCount}×)`,
+          v: `${breakdown.missedPenalty}`,
+          up: false,
+        },
+      ]
+    : [
+        {
+          l: "Sessions completed",
+          v: `${stats?.sessionsCompleted ?? 0}`,
+          up: true,
+        },
+        {
+          l: "Show-up rate",
+          v:
+            stats?.showUpRate != null
+              ? `${Math.round(stats.showUpRate * 100)}%`
+              : "—",
+          up: true,
+        },
+        {
+          l: `${stats?.currentStreak ?? 0}-day streak`,
+          v: `+${stats?.currentStreak ?? 0}`,
+          up: true,
+        },
+        {
+          l: "Avg rating",
+          v: stats?.avgRating != null ? `${stats.avgRating.toFixed(1)}/5` : "—",
+          up: true,
+        },
+      ];
+
+  const renderApplicantCard = (app: Application, slotAppsCount: number) => {
+    const applicant = app.applicant;
+    const color = applicant ? avatarColors(applicant.id) : "av-blue";
+    const tl = (applicant?.trustScore ?? 0) >= 750 ? "trust-high" : "trust-mid";
+    const dot =
+      (applicant?.trustScore ?? 0) >= 750 ? "bg-green" : "bg-[#c17800]";
+    const expiry = expiresIn(app.session?.approvalDeadline);
+    return (
+      <div key={app.id} className="bg-card p-4">
+        <div className="flex items-start gap-3 mb-2">
+          <div
+            className={`w-9 h-9 rounded-full ${color} flex items-center justify-center font-display font-extrabold text-xs flex-shrink-0`}
+          >
+            {applicant ? getInitials(applicant.name) : "?"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold">
+              {applicant?.name ?? "Applicant"}
+            </div>
+            <div className="font-mono text-[10px] text-text3 mt-0.5">
+              Applied {formatRelDate(app.createdAt)} ·{" "}
+              {applicant?.trustScore ?? 0} trust
+              {applicant?.showUpRate != null &&
+                ` · ${Math.round(applicant.showUpRate * 100)}% show-up`}
+              {applicant?.sessionsCount != null &&
+                ` · ${applicant.sessionsCount} sessions`}
+            </div>
+          </div>
+          {applicant && (
+            <div
+              className={`flex items-center gap-1 font-display font-extrabold text-base ${tl}`}
+            >
+              <div className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+              {applicant.trustScore}
+            </div>
+          )}
+        </div>
+        {app.message && (
+          <div className="bg-surface rounded-lg px-3 py-2 mb-3">
+            <div className="font-mono text-[10px] text-text3 mb-0.5">
+              Message
+            </div>
+            <div className="text-xs italic">&quot;{app.message}&quot;</div>
+          </div>
+        )}
+        {slotAppsCount > 1 && (
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-xs text-[#c17800]">
+            <span>⚠</span>
+            <span>
+              Approving this will auto-reject the other
+              {slotAppsCount > 2
+                ? ` ${slotAppsCount - 1} applicants`
+                : " applicant"}
+            </span>
+          </div>
+        )}
+        {expiry && expiry !== "expired" && (
+          <div className="font-mono text-[10px] text-[#c17800] mb-3">
+            ⚠ You must respond within {expiry} or slot re-opens
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Button
+            className="flex-[2] text-sm"
+            onClick={() => handleApprove(app.id)}
+          >
+            ✓ Approve {applicant?.name?.split(" ")[0] ?? "applicant"}
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1 text-sm"
+            onClick={() => handleReject(app.id)}
+          >
+            ✗ Reject
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className={cn("bg-card border rounded-[20px] p-4 md:p-5 mb-2", urgent ? "border-[#c17800]" : "border-border")}>
-      <div className="flex items-start gap-3 mb-3">
-        <div className={`w-9 md:w-10 h-9 md:h-10 rounded-full ${color} flex items-center justify-center font-display font-extrabold text-xs md:text-sm flex-shrink-0`}>
-          {initials}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold">{name}</div>
-          <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">Applied 1h ago · {trust} trust · {showUp} show-up · {sessions} sessions</div>
-        </div>
-        <div className={`flex items-center gap-1 md:gap-1.5 font-display font-extrabold text-base md:text-lg ${trust >= 750 ? 'trust-high' : 'trust-mid'}`}>
-          <div className={`w-1.5 md:w-2 h-1.5 md:h-2 rounded-full ${trust >= 750 ? 'bg-green' : 'bg-[#c17800]'}`} />
-          {trust}
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="font-display font-bold text-base md:text-[17px]">
+          Trust score
         </div>
       </div>
-      <div className="bg-surface rounded-lg p-3 mb-3">
-        <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-1">Message</div>
-        <div className="text-xs md:text-sm italic">&quot;{message}&quot;</div>
+      <div className="bg-card border border-border rounded-[20px] p-4 md:p-6 mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+          <div className="text-center sm:text-left flex-shrink-0">
+            <div className="font-display font-extrabold text-5xl text-green tracking-tight">
+              {stats?.trustScore ?? 500}
+            </div>
+            <div className="font-mono text-[10px] text-text3 mt-1">
+              your score
+            </div>
+          </div>
+          <div className="flex-1">
+            <div className="text-xs text-text2 mb-2 font-medium">
+              Score breakdown
+            </div>
+            {scoreRows.map(({ l, v, up }) => (
+              <div
+                key={l}
+                className="flex justify-between items-center font-mono text-[11px] text-text3 mb-1.5"
+              >
+                <span>{l}</span>
+                <span
+                  className={
+                    up ? "text-green font-semibold" : "text-red font-semibold"
+                  }
+                >
+                  {v}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
-      {urgent && <div className="font-mono text-[10px] md:text-[11px] text-red mb-3">You must respond within 4h or slot re-opens</div>}
-      <div className="flex gap-2">
-        <Button className="flex-[2] text-sm">Approve {name.split(' ')[0]}</Button>
-        <Button variant="outline" className="flex-1 text-sm">Reject</Button>
+      <div className="bg-surface rounded-[20px] p-4 mb-6">
+        <div className="font-mono text-[11px] text-text3 mb-3">Score tiers</div>
+        {[
+          {
+            c: "bg-green",
+            range: "750+",
+            desc: "Highly reliable, shown first in open slots",
+          },
+          {
+            c: "bg-[#c17800]",
+            range: "500–749",
+            desc: "Reliable. Occasionally missed sessions.",
+          },
+          {
+            c: "bg-red",
+            range: "Below 500",
+            desc: "Risky. Shown last in feed.",
+          },
+        ].map(({ c, range, desc }) => (
+          <div key={range} className="flex items-center gap-3 mb-1.5">
+            <div className={`w-2 h-2 rounded-full ${c}`} />
+            <span className="text-xs">
+              <strong>{range}</strong> — {desc}
+            </span>
+          </div>
+        ))}
       </div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="font-display font-bold text-base md:text-[17px]">
+          Pending applicants
+        </div>
+        {applications.length > 0 && (
+          <span className="badge-red text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full">
+            {applications.length} waiting
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-text2 mb-4">
+        Approve one per session slot. Unanswered slots re-open to the community
+        after the deadline.
+      </div>
+      {appLoading ? (
+        <div className="flex flex-col gap-2">
+          {[1, 2].map((i) => (
+            <div
+              key={i}
+              className="bg-card border border-border rounded-xl p-4 animate-pulse"
+            >
+              <div className="h-3.5 w-3/4 bg-surface3 rounded" />
+            </div>
+          ))}
+        </div>
+      ) : applications.length === 0 ? (
+        <p className="text-sm text-text3">No pending applicants right now.</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {Array.from(slotMap.entries()).map(([sid, { session, apps }]) => {
+            const expiry = expiresIn(session?.approvalDeadline);
+            const scheduledStr = session?.scheduledAt ?? session?.scheduledDate;
+            const sessionTime = scheduledStr
+              ? new Date(scheduledStr).toLocaleString("en-US", {
+                  weekday: "short",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })
+              : "";
+            return (
+              <div
+                key={sid}
+                className="rounded-xl overflow-hidden border border-amber-200"
+              >
+                <div className="flex items-center justify-between bg-amber-50 px-4 py-2.5">
+                  <div className="font-mono text-[11px] font-semibold text-[#c17800]">
+                    {session?.sessionNumber
+                      ? `Session #${session.sessionNumber} · `
+                      : ""}
+                    {session?.topic ?? "Session"}
+                    {sessionTime ? ` · ${sessionTime}` : ""}
+                  </div>
+                  {expiry && (
+                    <span className="font-mono text-[10px] text-[#c17800] bg-amber-100 px-2 py-0.5 rounded-full">
+                      expires in {expiry}
+                    </span>
+                  )}
+                </div>
+                <div className="divide-y divide-border">
+                  {apps.map((app) => renderApplicantCard(app, apps.length))}
+                </div>
+              </div>
+            );
+          })}
+          {ungrouped.map((app) => {
+            const applicant = app.applicant;
+            const color = applicant ? avatarColors(applicant.id) : "av-blue";
+            const tl =
+              (applicant?.trustScore ?? 0) >= 750 ? "trust-high" : "trust-mid";
+            const dot =
+              (applicant?.trustScore ?? 0) >= 750 ? "bg-green" : "bg-[#c17800]";
+            return (
+              <div
+                key={app.id}
+                className="bg-card border border-[#c17800] rounded-[20px] p-4 md:p-5"
+              >
+                <div className="flex items-start gap-3 mb-3">
+                  <div
+                    className={`w-9 md:w-10 h-9 md:h-10 rounded-full ${color} flex items-center justify-center font-display font-extrabold text-xs md:text-sm flex-shrink-0`}
+                  >
+                    {applicant ? getInitials(applicant.name) : "?"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold">
+                      {applicant?.name ?? "Applicant"}
+                    </div>
+                    <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">
+                      Applied {formatRelDate(app.createdAt)} ·{" "}
+                      {applicant?.trustScore ?? 0} trust
+                      {applicant?.showUpRate != null &&
+                        ` · ${Math.round(applicant.showUpRate * 100)}% show-up`}
+                      {applicant?.sessionsCount != null &&
+                        ` · ${applicant.sessionsCount} sessions`}
+                    </div>
+                  </div>
+                  {applicant && (
+                    <div
+                      className={`flex items-center gap-1 md:gap-1.5 font-display font-extrabold text-base md:text-lg ${tl}`}
+                    >
+                      <div
+                        className={`w-1.5 md:w-2 h-1.5 md:h-2 rounded-full ${dot}`}
+                      />
+                      {applicant.trustScore}
+                    </div>
+                  )}
+                </div>
+                {app.message && (
+                  <div className="bg-surface rounded-lg p-3 mb-3">
+                    <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-1">
+                      Message
+                    </div>
+                    <div className="text-xs md:text-sm italic">
+                      &quot;{app.message}&quot;
+                    </div>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-[2] text-sm"
+                    onClick={() => handleApprove(app.id)}
+                  >
+                    ✓ Approve {applicant?.name?.split(" ")[0] ?? "applicant"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 text-sm"
+                    onClick={() => handleReject(app.id)}
+                  >
+                    ✗ Reject
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
-  )
+  );
 }
