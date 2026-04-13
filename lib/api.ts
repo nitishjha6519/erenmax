@@ -39,6 +39,8 @@ export interface Goal {
   pledgedPoints: number;
   status: string;
   applicationsOpen: boolean;
+  startDate?: string;
+  endDate?: string;
   defaultDurationMins?: number;
   defaultPlatform?: string;
   approvalDeadlineOffset?: string;
@@ -364,6 +366,8 @@ export const api = {
       category: string;
       difficulty: string;
       pledgedPoints: number;
+      startDate?: string;
+      endDate?: string;
       defaultDurationMins?: number;
       defaultPlatform?: string;
       approvalDeadlineOffset?: string;
@@ -433,12 +437,17 @@ export const api = {
         duration?: number; // legacy alias
         platform?: string;
         meetingLink?: string;
+        stakedPoints?: number;
         approvalDeadlineOffset?: string;
       },
     ) =>
       request<{ session: GoalSession }>(`/api/goals/${goalId}/sessions`, {
         method: "POST",
         body: JSON.stringify(data),
+      }),
+    cancel: (goalId: string) =>
+      request<{ goal: Goal }>(`/api/goals/${goalId}/cancel`, {
+        method: "PATCH",
       }),
     delete: (goalId: string) =>
       request<void>(`/api/goals/${goalId}`, { method: "DELETE" }),

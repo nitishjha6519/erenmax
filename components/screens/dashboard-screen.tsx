@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import type {
   Goal,
   GoalDetail,
+  GoalSession,
   Session,
   Partner,
   UserStats,
@@ -84,14 +85,19 @@ function expiresIn(deadline?: string): string {
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [showAddTopicModal, setShowAddTopicModal] = useState(false);
   const [addTopicCategory, setAddTopicCategory] = useState("DSA");
   const [addTopicTopic, setAddTopicTopic] = useState("");
   const [addTopicDate, setAddTopicDate] = useState("");
   const [addTopicDuration, setAddTopicDuration] = useState("60");
-  const [addTopicDeadline, setAddTopicDeadline] = useState("2h");
+  const [addTopicMeetingLink, setAddTopicMeetingLink] = useState("");
+  const [addTopicStakedPoints, setAddTopicStakedPoints] = useState("100");
   const [addTopicLoading, setAddTopicLoading] = useState(false);
   const [addTopicError, setAddTopicError] = useState("");
+  const [cancelGoalId, setCancelGoalId] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState("");
   const [stats, setStats] = useState<UserStats | null>(null);
   const [myGoals, setMyGoals] = useState<Goal[]>([]);
   const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([]);
@@ -118,8 +124,12 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       .catch(console.error);
   }, []);
 
-  const activeGoal =
-    myGoals.find((g) => !["completed", "cancelled"].includes(g.status)) ?? null;
+  const myActiveGoals = myGoals.filter(
+    (g) => !["completed", "cancelled"].includes(g.status),
+  );
+  const activeGoal = myActiveGoals[0] ?? null;
+  const selectedGoal =
+    myActiveGoals.find((g) => g.id === selectedGoalId) ?? activeGoal;
   const trustScore = stats?.trustScore ?? user?.trustScore ?? 500;
   const repsDone =
     stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
@@ -127,26 +137,81 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   const streak = stats?.currentStreak ?? 0;
 
   const handleAddTopic = async () => {
-    if (!activeGoal?.id || !addTopicTopic.trim() || !addTopicDate) return;
+    if (!selectedGoal?.id || !addTopicTopic.trim() || !addTopicDate) return;
+    if (!addTopicMeetingLink.trim()) {
+      setAddTopicError("Meeting link is required.");
+      return;
+    }
+    const pts = parseInt(addTopicStakedPoints, 10);
+    if (!pts || pts < 1) {
+      setAddTopicError("Staked points must be at least 1.");
+      return;
+    }
+    // Validate session date is within goal's start/end date range
+    const sessionMs = new Date(addTopicDate).getTime();
+    if (selectedGoal.startDate) {
+      const goalStart = new Date(selectedGoal.startDate);
+      goalStart.setHours(0, 0, 0, 0);
+      if (sessionMs < goalStart.getTime()) {
+        setAddTopicError(
+          `Session date cannot be before the goal's start date (${goalStart.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}).`,
+        );
+        return;
+      }
+    }
+    if (selectedGoal.endDate) {
+      const goalEnd = new Date(selectedGoal.endDate);
+      goalEnd.setHours(23, 59, 59, 999);
+      if (sessionMs > goalEnd.getTime()) {
+        setAddTopicError(
+          `Session date cannot be after the goal's end date (${new Date(selectedGoal.endDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}).`,
+        );
+        return;
+      }
+    }
     setAddTopicLoading(true);
     setAddTopicError("");
     try {
-      await api.goals.addSession(activeGoal.id, {
+      await api.goals.addSession(selectedGoal.id, {
         topic: addTopicTopic.trim(),
         category: addTopicCategory,
         scheduledDate: new Date(addTopicDate).toISOString(),
         durationMins: parseInt(addTopicDuration),
-        approvalDeadlineOffset: addTopicDeadline,
+        meetingLink: addTopicMeetingLink.trim(),
+        stakedPoints: pts,
       });
       setShowAddTopicModal(false);
       setAddTopicTopic("");
       setAddTopicDate("");
+      setAddTopicMeetingLink("");
+      setAddTopicStakedPoints("100");
     } catch (e) {
       setAddTopicError(
         e instanceof Error ? e.message : "Failed to post topic. Try again.",
       );
     } finally {
       setAddTopicLoading(false);
+    }
+  };
+
+  const handleCancelGoal = async () => {
+    if (!cancelGoalId) return;
+    setCancelLoading(true);
+    setCancelError("");
+    try {
+      await api.goals.cancel(cancelGoalId);
+      setMyGoals((prev) =>
+        prev.map((g) =>
+          g.id === cancelGoalId ? { ...g, status: "cancelled" } : g,
+        ),
+      );
+      setCancelGoalId(null);
+    } catch (e) {
+      setCancelError(
+        e instanceof Error ? e.message : "Failed to cancel goal. Try again.",
+      );
+    } finally {
+      setCancelLoading(false);
     }
   };
 
@@ -245,8 +310,12 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
           {activeTab === "overview" && (
             <OverviewTab
               onNavigate={onNavigate}
-              setActiveTab={setActiveTab}
-              activeGoal={activeGoal}
+              onViewRoadmap={(id) => {
+                setSelectedGoalId(id);
+                setActiveTab("sessions");
+              }}
+              onCancelGoal={(id) => setCancelGoalId(id)}
+              myActiveGoals={myActiveGoals}
               upcomingSessions={upcomingSessions}
               stats={stats}
               loading={dataLoading}
@@ -255,9 +324,12 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
           {activeTab === "sessions" && (
             <SessionsTab
               onNavigate={onNavigate}
-              setShowAddTopicModal={setShowAddTopicModal}
+              setShowAddTopicModal={(open) => {
+                if (open) setSelectedGoalId(selectedGoal?.id ?? null);
+                setShowAddTopicModal(open);
+              }}
               setActiveTab={setActiveTab}
-              activeGoal={activeGoal}
+              activeGoal={selectedGoal}
               loading={dataLoading}
             />
           )}
@@ -325,9 +397,32 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
                 <input
                   type="datetime-local"
                   value={addTopicDate}
-                  onChange={(e) => setAddTopicDate(e.target.value)}
+                  min={
+                    selectedGoal?.startDate
+                      ? selectedGoal.startDate.slice(0, 16)
+                      : undefined
+                  }
+                  max={
+                    selectedGoal?.endDate
+                      ? selectedGoal.endDate.slice(0, 16)
+                      : undefined
+                  }
+                  onChange={(e) => {
+                    setAddTopicDate(e.target.value);
+                    setAddTopicError("");
+                  }}
                   className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none"
                 />
+                {(selectedGoal?.startDate || selectedGoal?.endDate) && (
+                  <p className="font-mono text-[10px] text-text3 mt-1">
+                    Must be within goal range
+                    {selectedGoal.startDate &&
+                      ` from ${new Date(selectedGoal.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                    {selectedGoal.endDate &&
+                      ` to ${new Date(selectedGoal.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                    .
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
@@ -345,20 +440,51 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
                 </select>
               </div>
             </div>
+            <div className="mb-4">
+              <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
+                Meeting link <span className="text-red">*</span>
+              </label>
+              <input
+                value={addTopicMeetingLink}
+                onChange={(e) => {
+                  setAddTopicMeetingLink(e.target.value);
+                  setAddTopicError("");
+                }}
+                className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none"
+                placeholder="https://meet.google.com/..."
+              />
+            </div>
             <div className="mb-5">
               <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
-                Approval deadline
+                Staked points
               </label>
-              <select
-                value={addTopicDeadline}
-                onChange={(e) => setAddTopicDeadline(e.target.value)}
-                className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-[15px] bg-card focus:border-primary outline-none cursor-pointer"
-              >
-                <option value="2h">2h before</option>
-                <option value="6h">6h before</option>
-                <option value="12h">12h before</option>
-                <option value="24h">24h before</option>
-              </select>
+              <div className="font-mono text-[10px] text-text3 mb-1.5">
+                Points the helper must stake. Deducted automatically on no-show.
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {["50", "100", "200", "500"].map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setAddTopicStakedPoints(p)}
+                    className={cn(
+                      "font-mono text-xs font-medium px-4 py-1.5 rounded-full border-[1.5px] cursor-pointer transition-colors",
+                      addTopicStakedPoints === p
+                        ? "border-primary text-primary bg-[#fff5f2]"
+                        : "border-border text-text2",
+                    )}
+                  >
+                    {p} pts
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min="1"
+                  value={addTopicStakedPoints}
+                  onChange={(e) => setAddTopicStakedPoints(e.target.value)}
+                  className="w-24 px-3 py-1.5 border-[1.5px] border-border rounded-full text-xs font-mono bg-card focus:border-primary outline-none"
+                  placeholder="Custom"
+                />
+              </div>
             </div>
             <div className="flex gap-2">
               <Button
@@ -374,14 +500,15 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
                   addTopicLoading ||
                   !addTopicTopic.trim() ||
                   !addTopicDate ||
-                  !activeGoal?.id
+                  !addTopicMeetingLink.trim() ||
+                  !selectedGoal?.id
                 }
                 onClick={handleAddTopic}
               >
                 {addTopicLoading ? "Posting…" : "Post to community"}
               </Button>
             </div>
-            {!activeGoal?.id && (
+            {!selectedGoal?.id && (
               <p className="font-mono text-[11px] text-red mt-2">
                 No active goal found. Create a goal first, then add topics to
                 it.
@@ -395,21 +522,75 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
           </div>
         </div>
       )}
+
+      {/* Cancel Goal Confirmation Modal */}
+      {cancelGoalId && (
+        <div
+          className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => {
+            if (!cancelLoading) {
+              setCancelGoalId(null);
+              setCancelError("");
+            }
+          }}
+        >
+          <div
+            className="bg-card rounded-[20px] p-6 md:p-8 w-full md:w-[440px] md:max-w-[90vw] animate-fade-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="font-display font-extrabold text-lg md:text-[22px] mb-2">
+              Cancel goal?
+            </div>
+            <div className="font-mono text-sm text-text2 mb-6">
+              This will permanently cancel your active goal. You&apos;ll be able
+              to post a new goal once it&apos;s cancelled. This action cannot be
+              undone.
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={cancelLoading}
+                onClick={() => {
+                  setCancelGoalId(null);
+                  setCancelError("");
+                }}
+              >
+                Keep goal
+              </Button>
+              <Button
+                className="flex-[2] bg-red-600 hover:bg-red-700 border-red-600 hover:border-red-700 text-white"
+                disabled={cancelLoading}
+                onClick={handleCancelGoal}
+              >
+                {cancelLoading ? "Cancelling…" : "Yes, cancel goal"}
+              </Button>
+            </div>
+            {cancelError && (
+              <p className="font-mono text-[11px] text-red mt-2">
+                {cancelError}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function OverviewTab({
   onNavigate,
-  setActiveTab,
-  activeGoal,
+  onViewRoadmap,
+  onCancelGoal,
+  myActiveGoals,
   upcomingSessions,
   stats,
   loading,
 }: {
   onNavigate: (s: string) => void;
-  setActiveTab: (t: string) => void;
-  activeGoal: Goal | null;
+  onViewRoadmap: (id: string) => void;
+  onCancelGoal: (id: string) => void;
+  myActiveGoals: Goal[];
   upcomingSessions: Session[];
   stats: UserStats | null;
   loading: boolean;
@@ -429,86 +610,106 @@ function OverviewTab({
       </div>
     );
 
-  const repsDone =
-    stats?.sessionsCompleted ?? stats?.repsDone ?? activeGoal?.repsDone ?? 0;
-  const repsTotal = activeGoal?.repsTotal ?? 100;
-  const pct = Math.round((repsDone / repsTotal) * 100);
+  const firstGoal = myActiveGoals[0] ?? null;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div className="font-display font-bold text-base md:text-[17px]">
-          Active goal
+          {myActiveGoals.length > 1 ? "Active goals" : "Active goal"}
         </div>
       </div>
-      {activeGoal ? (
-        <div className="bg-card border border-border rounded-[20px] p-4 md:p-6 mb-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-            <div>
-              <div className="font-display font-bold text-base md:text-[17px]">
-                {activeGoal.title}
+      {myActiveGoals.length > 0 ? (
+        <div className="flex flex-col gap-4 mb-4">
+          {myActiveGoals.map((goal) => {
+            const gRepsDone = goal.repsDone ?? 0;
+            const gRepsTotal = goal.repsTotal ?? 100;
+            const gPct = Math.round((gRepsDone / gRepsTotal) * 100);
+            return (
+              <div
+                key={goal.id}
+                className="bg-card border border-border rounded-[20px] p-4 md:p-6"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                  <div>
+                    <div className="font-display font-bold text-base md:text-[17px]">
+                      {goal.title}
+                    </div>
+                    <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">
+                      {catLabel(goal.category)}
+                    </div>
+                  </div>
+                  <span className="badge-green text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full self-start">
+                    Active
+                  </span>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-5 mb-4">
+                  <div
+                    className="w-16 md:w-20 h-16 md:h-20 rounded-full flex items-center justify-center relative flex-shrink-0 mx-auto sm:mx-0"
+                    style={{
+                      background: `conic-gradient(var(--accent) ${gPct}%, var(--surface3) 0)`,
+                    }}
+                  >
+                    <div className="absolute w-12 md:w-16 h-12 md:h-16 rounded-full bg-card" />
+                    <span className="font-display font-extrabold text-sm md:text-base z-10">
+                      {gRepsDone}
+                    </span>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex justify-between mb-2">
+                      <span className="font-mono text-[10px] md:text-[11px] text-text3">
+                        Progress to {gRepsTotal} reps
+                      </span>
+                      <span className="font-mono text-[10px] md:text-[11px] text-text3">
+                        {gPct}%
+                      </span>
+                    </div>
+                    <div className="progress-track">
+                      <div
+                        className="progress-fill"
+                        style={{ width: `${gPct}%` }}
+                      />
+                    </div>
+                    <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-2">
+                      {gRepsTotal - gRepsDone} reps remaining
+                    </div>
+                  </div>
+                </div>
+                <div className="h-px bg-border my-4" />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {/* <Button
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() =>
+                      onNavigate(
+                        upcomingSessions[0]?.id
+                          ? `session:${upcomingSessions[0].id}`
+                          : "session",
+                      )
+                    }
+                  >
+                    Start today&apos;s session
+                  </Button> */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => onViewRoadmap(goal.id)}
+                  >
+                    View roadmap
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:w-auto text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400"
+                    onClick={() => onCancelGoal(goal.id)}
+                  >
+                    Cancel goal
+                  </Button>
+                </div>
               </div>
-              <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-1">
-                {catLabel(activeGoal.category)}
-              </div>
-            </div>
-            <span className="badge-green text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full self-start">
-              Active
-            </span>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-5 mb-4">
-            <div
-              className="w-16 md:w-20 h-16 md:h-20 rounded-full flex items-center justify-center relative flex-shrink-0 mx-auto sm:mx-0"
-              style={{
-                background: `conic-gradient(var(--accent) ${pct}%, var(--surface3) 0)`,
-              }}
-            >
-              <div className="absolute w-12 md:w-16 h-12 md:h-16 rounded-full bg-card" />
-              <span className="font-display font-extrabold text-sm md:text-base z-10">
-                {repsDone}
-              </span>
-            </div>
-            <div className="flex-1">
-              <div className="flex justify-between mb-2">
-                <span className="font-mono text-[10px] md:text-[11px] text-text3">
-                  Progress to {repsTotal} reps
-                </span>
-                <span className="font-mono text-[10px] md:text-[11px] text-text3">
-                  {pct}%
-                </span>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="font-mono text-[10px] md:text-[11px] text-text3 mt-2">
-                {repsTotal - repsDone} reps remaining
-              </div>
-            </div>
-          </div>
-          <div className="h-px bg-border my-4" />
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={() =>
-                onNavigate(
-                  upcomingSessions[0]?.id
-                    ? `session:${upcomingSessions[0].id}`
-                    : "session",
-                )
-              }
-            >
-              Start today&apos;s session
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={() => setActiveTab("sessions")}
-            >
-              View roadmap
-            </Button>
-          </div>
+            );
+          })}
         </div>
       ) : (
         <div className="bg-card border border-dashed border-border rounded-[20px] p-6 mb-4 text-center">
@@ -526,12 +727,14 @@ function OverviewTab({
         <div className="font-display font-bold text-base md:text-[17px]">
           Upcoming sessions
         </div>
-        <button
-          className="font-mono text-xs text-primary cursor-pointer"
-          onClick={() => setActiveTab("sessions")}
-        >
-          View all
-        </button>
+        {firstGoal && (
+          <button
+            className="font-mono text-xs text-primary cursor-pointer"
+            onClick={() => onViewRoadmap(firstGoal.id)}
+          >
+            View all
+          </button>
+        )}
       </div>
       {upcomingSessions.length === 0 ? (
         <p className="text-sm text-text3 mb-6">No upcoming sessions.</p>
@@ -564,11 +767,7 @@ function OverviewTab({
                 <Button
                   size="sm"
                   onClick={() =>
-                    onNavigate(
-                      upcomingSessions[0]?.id
-                        ? `session:${upcomingSessions[0].id}`
-                        : "session",
-                    )
+                    onNavigate(s.id ? `session:${s.id}` : "session")
                   }
                 >
                   Join
@@ -637,7 +836,7 @@ function SessionsTab({
     setDetailLoading(true);
     Promise.all([
       api.goals.get(activeGoal.id),
-      api.sessions.getMySessions({ role: "owner", limit: 100 }),
+      api.sessions.getMySessions({ role: "owner", limit: 500 }),
     ])
       .then(([gd, sd]) => {
         setGoalDetail(gd.goal);
@@ -673,7 +872,17 @@ function SessionsTab({
       </div>
     );
 
-  const sessions = goalDetail?.sessions ?? [];
+  const sessions: GoalSession[] = (() => {
+    // Prefer the richer per-goal list from getMySessions; fill in anything
+    // the goal-detail endpoint returned that getMySessions may have missed.
+    const owned = allSessions.filter(
+      (s) => (s.goalId ?? s.goal?.id) === activeGoal?.id,
+    ) as unknown as GoalSession[];
+    const fromDetail = goalDetail?.sessions ?? [];
+    const seenIds = new Set(owned.map((s) => s.id));
+    const extra = fromDetail.filter((s) => !seenIds.has(s.id));
+    return [...owned, ...extra];
+  })();
   const repsDone = goalDetail?.repsDone ?? 0,
     repsTotal = goalDetail?.repsTotal ?? 100;
 

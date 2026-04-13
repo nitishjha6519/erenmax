@@ -16,13 +16,33 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
   const [goalTitle, setGoalTitle] = useState("");
   const [selectedTypes, setSelectedTypes] = useState(["DSA"]);
   const [description, setDescription] = useState("");
+  const [difficulty, setDifficulty] = useState("intermediate");
+  const [targetCompany, setTargetCompany] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [duration, setDuration] = useState("60");
-  const [platform, setPlatform] = useState("Google Meet");
-  const [approvalDeadline, setApprovalDeadline] = useState("6h");
+  const [dateErrors, setDateErrors] = useState<{ start?: string; end?: string }>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  // Returns today as YYYY-MM-DD in local time
+  const todayLocal = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  // Validate dates and return whether they pass
+  const validateDates = () => {
+    const today = todayLocal();
+    const errs: { start?: string; end?: string } = {};
+    if (startDate && startDate < today)
+      errs.start = "Start date must be today or a future date.";
+    if (endDate && endDate < today)
+      errs.end = "End date must be today or a future date.";
+    if (startDate && endDate && !errs.start && !errs.end && endDate <= startDate)
+      errs.end = "End date must be after start date.";
+    setDateErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
 
   const toggleType = (type: string) => {
     setSelectedTypes((prev) =>
@@ -42,11 +62,10 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
         title: goalTitle || "Untitled goal",
         description,
         category,
-        difficulty: "intermediate",
+        difficulty,
         pledgedPoints: 100,
-        defaultDurationMins: Number(duration),
-        defaultPlatform: platform,
-        approvalDeadlineOffset: approvalDeadline,
+        ...(startDate && { startDate: new Date(startDate).toISOString() }),
+        ...(endDate && { endDate: new Date(endDate).toISOString() }),
       });
       onNavigate("dashboard");
     } catch (e: unknown) {
@@ -133,7 +152,33 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
                 <input
                   className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none"
                   placeholder="e.g. Google L4, Meta E4, any senior SWE role"
+                  value={targetCompany}
+                  onChange={(e) => setTargetCompany(e.target.value)}
                 />
+              </div>
+              <div className="mb-4 md:mb-5">
+                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
+                  Difficulty level
+                </label>
+                <div className="flex gap-2 flex-wrap">
+                  {[
+                    { value: "beginner", label: "Beginner" },
+                    { value: "intermediate", label: "Intermediate" },
+                    { value: "advanced", label: "Advanced" },
+                  ].map((d) => (
+                    <button
+                      key={d.value}
+                      onClick={() => setDifficulty(d.value)}
+                      className={cn(
+                        "font-mono text-[10px] md:text-xs font-medium px-3 md:px-4 py-1.5 rounded-full border-[1.5px] border-border bg-card text-text2 cursor-pointer transition-all",
+                        difficulty === d.value &&
+                          "border-primary text-primary bg-[#fff5f2]",
+                      )}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="mb-5">
                 <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
@@ -166,82 +211,53 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
                   </label>
                   <input
                     type="date"
-                    className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none"
+                    min={todayLocal()}
+                    className={cn(
+                      "w-full px-3.5 py-2.5 border-[1.5px] rounded-lg text-sm md:text-[15px] bg-card outline-none",
+                      dateErrors.start ? "border-red" : "border-border focus:border-primary",
+                    )}
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      setDateErrors((prev) => ({ ...prev, start: undefined }));
+                    }}
                   />
+                  {dateErrors.start && (
+                    <p className="font-mono text-[11px] text-red mt-1">{dateErrors.start}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
-                    Target completion
+                    Target end date
                   </label>
                   <input
                     type="date"
-                    className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none"
+                    min={startDate || todayLocal()}
+                    className={cn(
+                      "w-full px-3.5 py-2.5 border-[1.5px] rounded-lg text-sm md:text-[15px] bg-card outline-none",
+                      dateErrors.end ? "border-red" : "border-border focus:border-primary",
+                    )}
                     value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
+                    onChange={(e) => {
+                      setEndDate(e.target.value);
+                      setDateErrors((prev) => ({ ...prev, end: undefined }));
+                    }}
                   />
+                  {dateErrors.end && (
+                    <p className="font-mono text-[11px] text-red mt-1">{dateErrors.end}</p>
+                  )}
                 </div>
               </div>
-              <div className="mb-4 md:mb-5">
-                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
-                  Default session length
-                </label>
-                <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-2">
-                  Can be set per-topic when you add sessions.
-                </div>
-                <select
-                  className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer"
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                >
-                  <option value="30">30 mins</option>
-                  <option value="45">45 mins</option>
-                  <option value="60">60 mins</option>
-                  <option value="90">90 mins</option>
-                </select>
-              </div>
-              <div className="mb-4 md:mb-5">
-                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
-                  Default meeting platform
-                </label>
-                <select
-                  className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer"
-                  value={platform}
-                  onChange={(e) => setPlatform(e.target.value)}
-                >
-                  <option value="Google Meet">Google Meet</option>
-                  <option value="Zoom">Zoom</option>
-                  <option value="Microsoft Teams">Microsoft Teams</option>
-                  <option value="per_session">
-                    I&apos;ll share links per session
-                  </option>
-                </select>
-              </div>
-              <div className="mb-5 md:mb-6">
-                <label className="block text-[13px] font-medium text-text2 mb-1.5 font-mono">
-                  Default approval deadline
-                </label>
-                <div className="font-mono text-[10px] md:text-[11px] text-text3 mb-2">
-                  How long before a session slot expires if you don&apos;t
-                  respond to applicants.
-                </div>
-                <select
-                  className="w-full px-3.5 py-2.5 border-[1.5px] border-border rounded-lg text-sm md:text-[15px] bg-card focus:border-primary outline-none cursor-pointer"
-                  value={approvalDeadline}
-                  onChange={(e) => setApprovalDeadline(e.target.value)}
-                >
-                  <option value="2h">2h before session</option>
-                  <option value="6h">6h before session</option>
-                  <option value="12h">12h before session</option>
-                  <option value="24h">24h before session</option>
-                </select>
-              </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 mt-2">
                 <Button variant="outline" onClick={() => setCurrentStep(1)}>
                   Back
                 </Button>
-                <Button className="flex-1" onClick={() => setCurrentStep(3)}>
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    if (validateDates()) setCurrentStep(3);
+                  }}
+                >
                   Continue
                 </Button>
               </div>
@@ -269,39 +285,39 @@ export function PostGoalScreen({ onNavigate }: PostGoalScreenProps) {
                   ))}
                 </div>
                 <div className="h-px bg-border my-4" />
-                <div className="grid grid-cols-2 gap-2 mb-3">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
                   <div>
-                    <div className="font-mono text-[10px] md:text-[11px] text-text3">
-                      Session length
-                    </div>
-                    <div className="font-semibold text-xs md:text-sm text-foreground mt-1">
-                      45 mins (default)
-                    </div>
+                    <div className="font-mono text-[10px] md:text-[11px] text-text3">Difficulty</div>
+                    <div className="font-semibold text-xs md:text-sm text-foreground mt-1 capitalize">{difficulty}</div>
                   </div>
-                  <div>
-                    <div className="font-mono text-[10px] md:text-[11px] text-text3">
-                      Approval deadline
+                  {targetCompany && (
+                    <div>
+                      <div className="font-mono text-[10px] md:text-[11px] text-text3">Target company / role</div>
+                      <div className="font-semibold text-xs md:text-sm text-foreground mt-1">{targetCompany}</div>
                     </div>
-                    <div className="font-semibold text-xs md:text-sm text-foreground mt-1">
-                      6h before
+                  )}
+                  {startDate && (
+                    <div>
+                      <div className="font-mono text-[10px] md:text-[11px] text-text3">Start date</div>
+                      <div className="font-semibold text-xs md:text-sm text-foreground mt-1">
+                        {new Date(startDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" })}
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="font-mono text-[10px] md:text-[11px] text-text3">
-                      Platform
+                  )}
+                  {endDate && (
+                    <div>
+                      <div className="font-mono text-[10px] md:text-[11px] text-text3">End date</div>
+                      <div className="font-semibold text-xs md:text-sm text-foreground mt-1">
+                        {new Date(endDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" })}
+                      </div>
                     </div>
-                    <div className="font-semibold text-xs md:text-sm text-foreground mt-1">
-                      Google Meet
+                  )}
+                  {description && (
+                    <div className="col-span-2">
+                      <div className="font-mono text-[10px] md:text-[11px] text-text3">Why it matters</div>
+                      <div className="text-xs md:text-sm text-foreground mt-1 leading-relaxed">{description}</div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="font-mono text-[10px] md:text-[11px] text-text3">
-                      Topics added
-                    </div>
-                    <div className="font-display font-extrabold text-primary mt-1">
-                      0 (add after)
-                    </div>
-                  </div>
+                  )}
                 </div>
                 <div className="bg-surface rounded-lg p-3 text-xs md:text-[13px] text-text2">
                   After posting, go to your Dashboard → Sessions tab to add
